@@ -4,7 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { storage } from "./storage";
 import { analyzeReport } from "./analyzer";
-import { detectViolations, generateLetter } from "./ai-services";
+import { detectViolations } from "./ai-services";
 
 const createScanSchema = z.object({
   consumerName: z.string().min(1, "consumerName is required"),
@@ -42,14 +42,6 @@ const updateNegativeAccountSchema = z.object({
   workflowStep: z.string().optional(),
 });
 
-const generateLetterSchema = z.object({
-  letterType: z.enum(["initial_dispute", "validation_request", "follow_up", "intent_to_sue"]),
-});
-
-const updateLetterSchema = z.object({
-  content: z.string().optional(),
-  status: z.enum(["draft", "ready", "sent"]).optional(),
-});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -193,8 +185,7 @@ export async function registerRoutes(
       const accountsWithDetails = await Promise.all(
         negAccounts.map(async (acct) => {
           const acctViolations = await storage.getViolationsByAccount(acct.id);
-          const acctLetters = await storage.getLettersByAccount(acct.id);
-          return { ...acct, violations: acctViolations, letters: acctLetters };
+          return { ...acct, violations: acctViolations };
         })
       );
       res.json({ ...scan, negativeAccounts: accountsWithDetails });
@@ -326,60 +317,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error scanning account:", error);
       res.status(500).json({ error: "Failed to scan account" });
-    }
-  });
-
-  app.post("/api/accounts/:id/generate-letter", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const parsed = generateLetterSchema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid letterType" });
-      const { letterType } = parsed.data;
-      const account = await storage.getNegativeAccount(id);
-      if (!account) return res.status(404).json({ error: "Account not found" });
-      const accountViolations = await storage.getViolationsByAccount(id);
-      const content = await generateLetter(account, accountViolations, letterType);
-      const recipientMap: Record<string, string> = {
-        initial_dispute: "Credit Reporting Agency",
-        validation_request: account.creditor,
-        follow_up: "Credit Reporting Agency / Furnisher",
-        intent_to_sue: account.creditor,
-      };
-      const letter = await storage.createLetter({
-        negativeAccountId: id,
-        letterType,
-        recipient: recipientMap[letterType] || "Credit Reporting Agency",
-        content,
-        status: "draft",
-      });
-      await storage.updateWorkflowStep(id, "letter_generated");
-      res.json(letter);
-    } catch (error) {
-      console.error("Error generating letter:", error);
-      res.status(500).json({ error: "Failed to generate letter" });
-    }
-  });
-
-  app.patch("/api/letters/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const parsed = updateLetterSchema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid input" });
-      const updates: any = {};
-      if (parsed.data.content !== undefined) updates.content = parsed.data.content;
-      if (parsed.data.status !== undefined) updates.status = parsed.data.status;
-      const letter = await storage.updateLetter(id, updates);
-      if (!letter) return res.status(404).json({ error: "Letter not found" });
-      if (parsed.data.status === "sent") {
-        const existing = await storage.getLetter(id);
-        if (existing) {
-          await storage.updateWorkflowStep(existing.negativeAccountId, "letter_sent");
-        }
-      }
-      res.json(letter);
-    } catch (error) {
-      console.error("Error updating letter:", error);
-      res.status(500).json({ error: "Failed to update letter" });
     }
   });
 

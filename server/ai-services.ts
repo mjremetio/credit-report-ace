@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { NegativeAccount, Violation } from "@shared/schema";
+import type { NegativeAccount } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -116,61 +116,6 @@ export async function detectViolations(account: NegativeAccount): Promise<Detect
   } catch {
     return [];
   }
-}
-
-const LETTER_SYSTEM_PROMPT = `You are LEXA, an expert FCRA dispute letter generator. You create professional, legally-grounded dispute letters based on account details and detected violations.
-
-## LETTER TYPES:
-- **initial_dispute**: Formal dispute letter to a Credit Reporting Agency (Equifax, Experian, TransUnion). Invokes §1681i rights. Demands investigation and correction/deletion.
-- **validation_request**: Debt validation letter to a debt collector under §1681g and FDCPA §809(b). Demands proof of debt, chain of ownership, and right to collect.
-- **follow_up**: Follow-up letter after initial dispute. References previous dispute, demands status update, warns of escalation.
-- **intent_to_sue**: Pre-litigation demand letter. References all violations, demands cure within 30 days, warns of lawsuit under FCRA.
-
-## FORMATTING RULES:
-- Use professional business letter format
-- Include today's date placeholder as [DATE]
-- Include consumer name placeholder as [CONSUMER_NAME]
-- Include consumer address placeholder as [CONSUMER_ADDRESS]
-- Include proper recipient address section
-- Reference specific account details (creditor, account number, balance)
-- Cite specific FCRA statutes for each violation
-- Include clear demands/requests
-- Include deadline (30 days for disputes, 15 days for validation)
-- Include statement about retaining copies
-- Professional closing
-
-Write the complete letter text. Do NOT use JSON format. Write the letter as plain text ready to print and send.`;
-
-export async function generateLetter(
-  account: NegativeAccount,
-  accountViolations: Violation[],
-  letterType: string
-): Promise<string> {
-  const accountDetails = buildAccountDescription(account);
-  const violationsSummary = accountViolations.map(v =>
-    `- ${v.violationType}: ${v.explanation} (${v.fcraStatute})`
-  ).join("\n");
-
-  const recipientMap: Record<string, string> = {
-    initial_dispute: "Credit Reporting Agency",
-    validation_request: account.creditor,
-    follow_up: "Credit Reporting Agency / Furnisher",
-    intent_to_sue: account.creditor,
-  };
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-5.2",
-    messages: [
-      { role: "system", content: LETTER_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: `Generate a "${letterType}" letter for the following account:\n\n## Account Details:\n${accountDetails}\n\n## Detected Violations:\n${violationsSummary || "No specific violations detected — dispute based on accuracy concerns."}\n\n## Recipient: ${recipientMap[letterType] || "Credit Reporting Agency"}\n\nWrite the complete letter now.`
-      }
-    ],
-    max_completion_tokens: 4096,
-  });
-
-  return response.choices[0]?.message?.content || "Error generating letter. Please try again.";
 }
 
 function buildAccountDescription(account: NegativeAccount): string {

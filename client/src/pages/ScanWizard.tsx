@@ -1,16 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import {
   BrainCircuit, ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
-  Activity, Loader2, CheckCircle2, ChevronRight, Zap, AlertTriangle,
-  Send, ClipboardList, Eye, Edit3, Download, X, Check
+  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
-  deleteNegativeAccount, scanAccountForViolations, generateLetterForAccount,
-  updateLetter
+  deleteNegativeAccount, scanAccountForViolations
 } from "@/lib/api";
 
 const STEPS = [
@@ -131,7 +129,7 @@ function Step1Welcome({ scan, goToStep }: { scan: any; goToStep: (s: number) => 
         </div>
         <h2 className="font-display text-3xl text-white mb-3">Welcome, {scan.consumerName}</h2>
         <p className="text-muted-foreground font-mono text-sm max-w-lg mx-auto">
-          This guided workflow will help you organize your negative credit accounts, identify potential FCRA violations, and prepare dispute letters.
+          This guided workflow will help you organize your negative credit accounts and identify potential FCRA violations.
         </p>
       </div>
 
@@ -140,7 +138,7 @@ function Step1Welcome({ scan, goToStep }: { scan: any; goToStep: (s: number) => 
           { step: 1, title: "Start Your Scan", desc: "You're here. Ready to begin." },
           { step: 2, title: "Add Negative Accounts", desc: "Paste or enter the negative items from your credit reports." },
           { step: 3, title: "Classify Each Account", desc: "Categorize accounts as Debt Collection, Charge-Off, or Repossession." },
-          { step: 4, title: "Follow Next Steps", desc: "Track progress and know what to do next for each account." },
+          { step: 4, title: "Follow Next Steps", desc: "Scan for violations and see clear next actions for each account." },
         ].map((item) => (
           <div key={item.step} className={`flex items-start gap-4 p-4 rounded-lg border ${item.step === 1 ? "border-primary/30 bg-primary/5" : "border-border bg-card"}`}>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-mono flex-shrink-0 ${item.step === 1 ? "bg-primary text-black" : "bg-secondary text-muted-foreground"}`}>
@@ -406,12 +404,7 @@ function AccountClassifyCard({ account, index, onUpdate }: { account: any; index
           </div>
           <h3 className="font-display text-lg text-white">{account.creditor}</h3>
         </div>
-        <span className={`text-xs font-mono px-2 py-1 rounded border ${
-          account.workflowStep === "pending" ? "border-yellow-500/30 text-yellow-400 bg-yellow-500/10" :
-          "border-primary/30 text-primary bg-primary/10"
-        }`}>
-          {account.workflowStep}
-        </span>
+        <WorkflowBadge step={account.workflowStep} />
       </div>
 
       <div className="p-6">
@@ -471,9 +464,6 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const negAccounts = scan.negativeAccounts || [];
 
   const [scanningId, setScanningId] = useState<number | null>(null);
-  const [generatingId, setGeneratingId] = useState<number | null>(null);
-  const [editingLetterId, setEditingLetterId] = useState<number | null>(null);
-  const [editContent, setEditContent] = useState("");
 
   const scanMutation = useMutation({
     mutationFn: scanAccountForViolations,
@@ -484,40 +474,9 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
     onError: () => setScanningId(null),
   });
 
-  const generateMutation = useMutation({
-    mutationFn: ({ accountId, letterType }: { accountId: number; letterType: string }) =>
-      generateLetterForAccount(accountId, letterType),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
-      setGeneratingId(null);
-    },
-    onError: () => setGeneratingId(null),
-  });
-
-  const updateLetterMutation = useMutation({
-    mutationFn: ({ letterId, data }: { letterId: number; data: any }) => updateLetter(letterId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
-      setEditingLetterId(null);
-    },
-  });
-
   const handleScan = (accountId: number) => {
     setScanningId(accountId);
     scanMutation.mutate(accountId);
-  };
-
-  const handleGenerate = (accountId: number, letterType: string) => {
-    setGeneratingId(accountId);
-    generateMutation.mutate({ accountId, letterType });
-  };
-
-  const handleMarkSent = (letterId: number) => {
-    updateLetterMutation.mutate({ letterId, data: { status: "sent" } });
-  };
-
-  const handleSaveEdit = (letterId: number) => {
-    updateLetterMutation.mutate({ letterId, data: { content: editContent } });
   };
 
   const completeScan = () => {
@@ -531,16 +490,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
       <div className="mb-8">
         <h2 className="font-display text-2xl text-white mb-2">Next Steps</h2>
         <p className="text-muted-foreground font-mono text-sm">
-          For each account, scan for violations, generate dispute letters, and track your progress.
+          Scan each account for potential FCRA violations and review the results.
         </p>
       </div>
 
       <div className="space-y-6 mb-8">
         {negAccounts.map((acct: any) => {
           const hasViolations = acct.violations && acct.violations.length > 0;
-          const hasLetters = acct.letters && acct.letters.length > 0;
           const isScanning = scanningId === acct.id;
-          const isGenerating = generatingId === acct.id;
 
           return (
             <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
@@ -556,56 +513,17 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               </div>
 
               <div className="p-6 space-y-4">
-                <div className="flex flex-wrap gap-3">
-                  {acct.workflowStep === "pending" || acct.workflowStep === "classified" ? (
-                    <button
-                      data-testid={`button-scan-${acct.id}`}
-                      onClick={() => handleScan(acct.id)}
-                      disabled={isScanning}
-                      className="px-4 py-2 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-                    >
-                      {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                      {isScanning ? "Scanning..." : "Scan for Violations"}
-                    </button>
-                  ) : null}
-
-                  {(acct.workflowStep === "scanned" || hasViolations) && !hasLetters && (
-                    <>
-                      <button
-                        data-testid={`button-generate-dispute-${acct.id}`}
-                        onClick={() => handleGenerate(acct.id, "initial_dispute")}
-                        disabled={isGenerating}
-                        className="px-4 py-2 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-                      >
-                        {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                        Generate Dispute Letter
-                      </button>
-                      {acct.accountType === "debt_collection" && (
-                        <button
-                          data-testid={`button-generate-validation-${acct.id}`}
-                          onClick={() => handleGenerate(acct.id, "validation_request")}
-                          disabled={isGenerating}
-                          className="px-4 py-2 bg-secondary border border-border text-white font-medium rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-                        >
-                          {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                          Validation Request
-                        </button>
-                      )}
-                    </>
-                  )}
-
-                  {hasLetters && (
-                    <button
-                      data-testid={`button-generate-followup-${acct.id}`}
-                      onClick={() => handleGenerate(acct.id, "follow_up")}
-                      disabled={isGenerating}
-                      className="px-4 py-2 bg-secondary border border-border text-white font-medium rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-                    >
-                      {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                      Generate Follow-Up
-                    </button>
-                  )}
-                </div>
+                {(acct.workflowStep === "pending" || acct.workflowStep === "classified") && (
+                  <button
+                    data-testid={`button-scan-${acct.id}`}
+                    onClick={() => handleScan(acct.id)}
+                    disabled={isScanning}
+                    className="px-4 py-2 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+                  >
+                    {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                    {isScanning ? "Scanning..." : "Scan for Violations"}
+                  </button>
+                )}
 
                 {hasViolations && (
                   <div>
@@ -627,84 +545,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                   </div>
                 )}
 
-                {hasLetters && (
-                  <div>
-                    <h4 className="text-xs font-mono text-primary mb-2 flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> GENERATED LETTERS ({acct.letters.length})
-                    </h4>
-                    <div className="space-y-3">
-                      {acct.letters.map((letter: any) => (
-                        <div key={letter.id} data-testid={`letter-${letter.id}`} className="bg-background border border-border rounded-lg overflow-hidden">
-                          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-white font-medium">{formatLetterType(letter.letterType)}</span>
-                              <span className="text-xs font-mono text-muted-foreground">To: {letter.recipient}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                                letter.status === "sent" ? "border-green-500/30 text-green-400 bg-green-500/10" :
-                                letter.status === "ready" ? "border-primary/30 text-primary bg-primary/10" :
-                                "border-border text-muted-foreground bg-secondary"
-                              }`}>
-                                {letter.status}
-                              </span>
-                              {letter.status !== "sent" && (
-                                <>
-                                  <button
-                                    data-testid={`button-edit-letter-${letter.id}`}
-                                    onClick={() => { setEditingLetterId(letter.id); setEditContent(letter.content); }}
-                                    className="p-1 text-muted-foreground hover:text-white transition-colors"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    data-testid={`button-mark-sent-${letter.id}`}
-                                    onClick={() => handleMarkSent(letter.id)}
-                                    className="px-2 py-1 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded hover:bg-green-500/30 transition-colors inline-flex items-center gap-1"
-                                  >
-                                    <Check className="w-3 h-3" /> Mark Sent
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          {editingLetterId === letter.id ? (
-                            <div className="p-4">
-                              <textarea
-                                data-testid={`textarea-edit-letter-${letter.id}`}
-                                value={editContent}
-                                onChange={(e) => setEditContent(e.target.value)}
-                                rows={15}
-                                className="w-full bg-card border border-border rounded-lg px-4 py-3 text-white font-mono text-xs focus:outline-none focus:border-primary resize-none"
-                              />
-                              <div className="flex gap-2 mt-3">
-                                <button
-                                  data-testid={`button-save-letter-${letter.id}`}
-                                  onClick={() => handleSaveEdit(letter.id)}
-                                  className="px-4 py-2 bg-primary text-black font-medium rounded-lg text-xs inline-flex items-center gap-1"
-                                >
-                                  <Check className="w-3 h-3" /> Save
-                                </button>
-                                <button
-                                  onClick={() => setEditingLetterId(null)}
-                                  className="px-4 py-2 bg-secondary border border-border text-muted-foreground rounded-lg text-xs"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="p-4 max-h-60 overflow-y-auto">
-                              <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">{letter.content}</pre>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                {acct.workflowStep === "scanned" && !hasViolations && (
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-center">
+                    <CheckCircle2 className="w-5 h-5 text-green-400 mx-auto mb-2" />
+                    <p className="text-sm text-green-400 font-mono">No violations detected for this account.</p>
                   </div>
                 )}
 
-                {!hasViolations && !hasLetters && acct.workflowStep === "pending" && (
+                {!hasViolations && acct.workflowStep !== "scanned" && (
                   <div className="text-center py-4 text-xs font-mono text-muted-foreground">
                     Click "Scan for Violations" to analyze this account for FCRA issues
                   </div>
@@ -768,9 +616,6 @@ function WorkflowBadge({ step }: { step: string }) {
     pending: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10",
     classified: "border-blue-500/30 text-blue-400 bg-blue-500/10",
     scanned: "border-purple-500/30 text-purple-400 bg-purple-500/10",
-    letter_generated: "border-primary/30 text-primary bg-primary/10",
-    letter_sent: "border-green-500/30 text-green-400 bg-green-500/10",
-    follow_up: "border-orange-500/30 text-orange-400 bg-orange-500/10",
   };
   return (
     <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colors[step] || colors.pending}`}>
@@ -798,16 +643,6 @@ function formatAccountType(type: string): string {
     debt_collection: "Debt Collection",
     charge_off: "Charge-Off",
     repossession: "Repossession",
-  };
-  return map[type] || type;
-}
-
-function formatLetterType(type: string): string {
-  const map: Record<string, string> = {
-    initial_dispute: "Initial Dispute Letter",
-    validation_request: "Debt Validation Request",
-    follow_up: "Follow-Up Letter",
-    intent_to_sue: "Intent to Sue Letter",
   };
   return map[type] || type;
 }

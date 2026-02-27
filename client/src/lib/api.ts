@@ -108,22 +108,3 @@ export async function scanAccountForViolations(accountId: number) {
   return res.json();
 }
 
-export async function generateLetterForAccount(accountId: number, letterType: string) {
-  const res = await fetch(`/api/accounts/${accountId}/generate-letter`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ letterType }),
-  });
-  if (!res.ok) throw new Error("Failed to generate letter");
-  return res.json();
-}
-
-export async function updateLetter(letterId: number, data: { content?: string; status?: string }) {
-  const res = await fetch(`/api/letters/${letterId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error("Failed to update letter");
-  return res.json();
-}

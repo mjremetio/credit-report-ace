@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   BrainCircuit, ArrowLeft, Shield, FileText, AlertTriangle,
-  Loader2, User, BarChart3, CheckCircle2, Clock, XCircle, TrendingUp
+  Loader2, BarChart3, TrendingUp
 } from "lucide-react";
 import { fetchScans, fetchScan } from "@/lib/api";
 import { useState, useEffect } from "react";
@@ -22,15 +22,13 @@ export default function ProfileView() {
     Promise.all(scans.map((s: any) => fetchScan(s.id))).then((fullScans) => {
       const allAccounts: any[] = [];
       const allViolations: any[] = [];
-      const allLetters: any[] = [];
       fullScans.forEach((s: any) => {
         (s.negativeAccounts || []).forEach((a: any) => {
           allAccounts.push({ ...a, scanConsumerName: s.consumerName });
           (a.violations || []).forEach((v: any) => allViolations.push({ ...v, creditor: a.creditor }));
-          (a.letters || []).forEach((l: any) => allLetters.push({ ...l, creditor: a.creditor }));
         });
       });
-      setAllData({ scans: fullScans, accounts: allAccounts, violations: allViolations, letters: allLetters });
+      setAllData({ scans: fullScans, accounts: allAccounts, violations: allViolations });
     });
   }, [scans]);
 
@@ -44,8 +42,7 @@ export default function ProfileView() {
 
   const totalAccounts = allData.accounts.length;
   const totalViolations = allData.violations.length;
-  const totalLetters = allData.letters.length;
-  const sentLetters = allData.letters.filter((l: any) => l.status === "sent").length;
+  const totalScans = allData.scans.length;
 
   const severityCounts = allData.violations.reduce((acc: Record<string, number>, v: any) => {
     acc[v.severity] = (acc[v.severity] || 0) + 1;
@@ -77,11 +74,10 @@ export default function ProfileView() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-3 gap-4">
+          <StatCard label="Total Scans" value={totalScans} icon={Shield} />
           <StatCard label="Negative Accounts" value={totalAccounts} icon={FileText} />
           <StatCard label="Violations Found" value={totalViolations} icon={AlertTriangle} color="destructive" />
-          <StatCard label="Letters Generated" value={totalLetters} icon={Shield} />
-          <StatCard label="Letters Sent" value={sentLetters} icon={CheckCircle2} color="green" />
         </motion.div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -128,7 +124,7 @@ export default function ProfileView() {
               <TrendingUp className="w-4 h-4 text-primary" /> Workflow Status
             </h3>
             <div className="space-y-3">
-              {["pending", "classified", "scanned", "letter_generated", "letter_sent", "follow_up"].map((ws) => {
+              {["pending", "classified", "scanned"].map((ws) => {
                 const count = stepCounts[ws] || 0;
                 if (count === 0) return null;
                 return (
@@ -162,7 +158,6 @@ export default function ProfileView() {
                   <tbody>
                     {allData.accounts.map((acct: any) => {
                       const acctViolations = allData.violations.filter((v: any) => v.negativeAccountId === acct.id);
-                      const acctLetters = allData.letters.filter((l: any) => l.negativeAccountId === acct.id);
                       return (
                         <tr key={acct.id} data-testid={`profile-row-${acct.id}`} className="border-b border-border/50 hover:bg-secondary/20">
                           <td className="px-4 py-3 text-sm text-white font-medium">{acct.creditor}</td>
@@ -244,9 +239,6 @@ function WorkflowBadge({ step }: { step: string }) {
     pending: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10",
     classified: "border-blue-500/30 text-blue-400 bg-blue-500/10",
     scanned: "border-purple-500/30 text-purple-400 bg-purple-500/10",
-    letter_generated: "border-primary/30 text-primary bg-primary/10",
-    letter_sent: "border-green-500/30 text-green-400 bg-green-500/10",
-    follow_up: "border-orange-500/30 text-orange-400 bg-orange-500/10",
   };
   return (
     <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colors[step] || colors.pending}`}>
