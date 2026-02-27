@@ -130,7 +130,7 @@ export default function Home() {
             </div>
             <h2 className="font-display text-2xl text-white mb-3">No Active Scans</h2>
             <p className="text-muted-foreground font-mono text-sm max-w-md mx-auto mb-8">
-              Start a new scan to begin analyzing your credit report for FCRA violations and generate dispute letters.
+              Start a new scan to begin analyzing your credit report for potential FCRA violations.
             </p>
             <button
               data-testid="button-empty-new-scan"

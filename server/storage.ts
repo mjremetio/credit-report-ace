@@ -4,7 +4,7 @@ import {
   type Report, type InsertReport, type Finding, type InsertFinding,
   type Account, type InsertAccount, type Scan, type InsertScan,
   type NegativeAccount, type InsertNegativeAccount,
-  type Violation, type InsertViolation, type Letter, type InsertLetter
+  type Violation, type InsertViolation
 } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -37,11 +37,6 @@ export interface IStorage {
   getViolationsByAccount(negativeAccountId: number): Promise<Violation[]>;
   getViolationsByScan(scanId: number): Promise<Violation[]>;
 
-  createLetter(letter: InsertLetter): Promise<Letter>;
-  getLetter(id: number): Promise<Letter | undefined>;
-  getLettersByAccount(negativeAccountId: number): Promise<Letter[]>;
-  updateLetter(id: number, data: Partial<InsertLetter>): Promise<Letter | undefined>;
-  deleteLetter(id: number): Promise<void>;
 }
 
 class DatabaseStorage implements IStorage {
@@ -153,24 +148,6 @@ class DatabaseStorage implements IStorage {
     return allViolations;
   }
 
-  async createLetter(letter: InsertLetter): Promise<Letter> {
-    const [created] = await db.insert(letters).values(letter).returning();
-    return created;
-  }
-  async getLetter(id: number): Promise<Letter | undefined> {
-    const [letter] = await db.select().from(letters).where(eq(letters.id, id));
-    return letter;
-  }
-  async getLettersByAccount(negativeAccountId: number): Promise<Letter[]> {
-    return db.select().from(letters).where(eq(letters.negativeAccountId, negativeAccountId));
-  }
-  async updateLetter(id: number, data: Partial<InsertLetter>): Promise<Letter | undefined> {
-    const [updated] = await db.update(letters).set(data).where(eq(letters.id, id)).returning();
-    return updated;
-  }
-  async deleteLetter(id: number): Promise<void> {
-    await db.delete(letters).where(eq(letters.id, id));
-  }
 }
 
 export const storage = new DatabaseStorage();
