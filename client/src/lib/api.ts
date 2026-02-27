@@ -73,7 +73,10 @@ export async function deleteNegativeAccount(scanId: number, accountId: number) {
 
 export async function scanAccountForViolations(accountId: number) {
   const res = await fetch(`/api/accounts/${accountId}/scan`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to scan account");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to scan account for violations");
+  }
   return res.json();
 }
 

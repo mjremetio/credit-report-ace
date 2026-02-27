@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
-  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList
+  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
@@ -458,20 +458,46 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const queryClient = useQueryClient();
   const negAccounts = scan.negativeAccounts || [];
 
-  const [scanningId, setScanningId] = useState<number | null>(null);
+  const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanAllRunning, setScanAllRunning] = useState(false);
 
   const scanMutation = useMutation({
     mutationFn: scanAccountForViolations,
-    onSuccess: () => {
+    onSuccess: (_data, accountId) => {
       queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
-      setScanningId(null);
+      setScanningIds(prev => { const next = new Set(prev); next.delete(accountId); return next; });
+      setScanError(null);
     },
-    onError: () => setScanningId(null),
+    onError: (err: Error, accountId) => {
+      setScanningIds(prev => { const next = new Set(prev); next.delete(accountId); return next; });
+      setScanError(err.message || "Scan failed. Please try again.");
+    },
   });
 
   const handleScan = (accountId: number) => {
-    setScanningId(accountId);
+    setScanError(null);
+    setScanningIds(prev => new Set(prev).add(accountId));
     scanMutation.mutate(accountId);
+  };
+
+  const handleScanAll = async () => {
+    setScanError(null);
+    setScanAllRunning(true);
+    const unscanned = negAccounts.filter((a: any) => a.workflowStep !== "scanned");
+    const ids = unscanned.map((a: any) => a.id);
+    setScanningIds(new Set(ids));
+
+    for (const accountId of ids) {
+      try {
+        await scanAccountForViolations(accountId);
+      } catch (err: any) {
+        setScanError(`Scan failed for one or more accounts. ${err.message || ""}`);
+      }
+      setScanningIds(prev => { const next = new Set(prev); next.delete(accountId); return next; });
+    }
+    queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
+    setScanAllRunning(false);
   };
 
   const completeScan = () => {
@@ -480,19 +506,57 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
     });
   };
 
+  const unscannedCount = negAccounts.filter((a: any) => a.workflowStep !== "scanned").length;
+  const totalViolationCount = negAccounts.reduce((sum: number, a: any) => sum + (a.violations?.length || 0), 0);
+
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-      <div className="mb-8">
-        <h2 className="font-display text-2xl text-white mb-2">Next Steps</h2>
-        <p className="text-muted-foreground font-mono text-sm">
-          Scan each account for potential FCRA violations and review the results.
-        </p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h2 className="font-display text-2xl text-white mb-2">Next Steps</h2>
+          <p className="text-muted-foreground font-mono text-sm">
+            Scan each account for potential FCRA violations and review the results.
+          </p>
+        </div>
+        {unscannedCount > 0 && (
+          <button
+            data-testid="button-scan-all"
+            onClick={handleScanAll}
+            disabled={scanAllRunning}
+            className="px-5 py-2.5 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm flex-shrink-0"
+          >
+            {scanAllRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            {scanAllRunning ? "Scanning All..." : `Scan All (${unscannedCount})`}
+          </button>
+        )}
       </div>
+
+      {scanError && (
+        <div data-testid="scan-error" className="mb-6 bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0" />
+          <p className="text-sm font-mono text-destructive">{scanError}</p>
+        </div>
+      )}
+
+      {totalViolationCount > 0 && (
+        <div className="mb-6 bg-primary/5 border border-primary/20 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-primary" />
+            <span className="text-sm font-mono text-white">
+              {totalViolationCount} violation{totalViolationCount !== 1 ? "s" : ""} detected across {negAccounts.filter((a: any) => a.violations?.length > 0).length} account{negAccounts.filter((a: any) => a.violations?.length > 0).length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <span className="text-xs font-mono text-muted-foreground">
+            {unscannedCount === 0 ? "All accounts scanned" : `${unscannedCount} remaining`}
+          </span>
+        </div>
+      )}
 
       <div className="space-y-6 mb-8">
         {negAccounts.map((acct: any) => {
           const hasViolations = acct.violations && acct.violations.length > 0;
-          const isScanning = scanningId === acct.id;
+          const isScanning = scanningIds.has(acct.id);
+          const isScanned = acct.workflowStep === "scanned";
 
           return (
             <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
@@ -501,55 +565,82 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                   <h3 className="font-display text-lg text-white">{acct.creditor}</h3>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-xs font-mono text-muted-foreground">{formatAccountType(acct.accountType)}</span>
-                    {acct.balance && <span className="text-xs font-mono text-white">${acct.balance}</span>}
+                    {acct.balance && <span className="text-xs font-mono text-white">${Number(acct.balance).toLocaleString()}</span>}
                     <WorkflowBadge step={acct.workflowStep} />
                   </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!isScanned && (
+                    <button
+                      data-testid={`button-scan-${acct.id}`}
+                      onClick={() => handleScan(acct.id)}
+                      disabled={isScanning || scanAllRunning}
+                      className="px-4 py-2 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+                    >
+                      {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                      {isScanning ? "Scanning..." : "Scan"}
+                    </button>
+                  )}
+                  {isScanned && (
+                    <button
+                      data-testid={`button-rescan-${acct.id}`}
+                      onClick={() => handleScan(acct.id)}
+                      disabled={isScanning || scanAllRunning}
+                      className="px-3 py-1.5 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-white hover:border-primary/30 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-xs"
+                    >
+                      {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                      Re-scan
+                    </button>
+                  )}
                 </div>
               </div>
 
               <div className="p-6 space-y-4">
-                {(acct.workflowStep === "pending" || acct.workflowStep === "classified") && (
-                  <button
-                    data-testid={`button-scan-${acct.id}`}
-                    onClick={() => handleScan(acct.id)}
-                    disabled={isScanning}
-                    className="px-4 py-2 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-                  >
-                    {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                    {isScanning ? "Scanning..." : "Scan for Violations"}
-                  </button>
+                {isScanning && (
+                  <div className="flex items-center gap-3 py-4 justify-center">
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                    <span className="text-sm font-mono text-primary">AI analyzing for FCRA violations...</span>
+                  </div>
                 )}
 
-                {hasViolations && (
+                {!isScanning && hasViolations && (
                   <div>
-                    <h4 className="text-xs font-mono text-primary mb-2 flex items-center gap-1">
+                    <h4 className="text-xs font-mono text-primary mb-3 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" /> DETECTED VIOLATIONS ({acct.violations.length})
                     </h4>
                     <div className="space-y-2">
                       {acct.violations.map((v: any) => (
-                        <div key={v.id} data-testid={`violation-${v.id}`} className="bg-background border border-border rounded-lg p-3">
-                          <div className="flex items-center gap-2 mb-1">
+                        <div key={v.id} data-testid={`violation-${v.id}`} className="bg-background border border-border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-1.5">
                             <SeverityBadge severity={v.severity} />
                             <span className="text-sm text-white font-medium">{v.violationType}</span>
                           </div>
-                          <p className="text-xs font-mono text-muted-foreground">{v.explanation}</p>
-                          <div className="mt-1 text-xs font-mono text-primary">{v.fcraStatute}</div>
+                          <p className="text-xs font-mono text-muted-foreground leading-relaxed">{v.explanation}</p>
+                          {v.evidence && (
+                            <p className="text-xs font-mono text-muted-foreground/70 mt-1.5 italic">Evidence: {v.evidence}</p>
+                          )}
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs font-mono text-primary">{v.fcraStatute}</span>
+                            {v.matchedRule && (
+                              <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{v.matchedRule}</span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {acct.workflowStep === "scanned" && !hasViolations && (
+                {!isScanning && isScanned && !hasViolations && (
                   <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-center">
                     <CheckCircle2 className="w-5 h-5 text-green-400 mx-auto mb-2" />
                     <p className="text-sm text-green-400 font-mono">No violations detected for this account.</p>
                   </div>
                 )}
 
-                {!hasViolations && acct.workflowStep !== "scanned" && (
+                {!isScanning && !hasViolations && !isScanned && (
                   <div className="text-center py-4 text-xs font-mono text-muted-foreground">
-                    Click "Scan for Violations" to analyze this account for FCRA issues
+                    Click "Scan" to analyze this account for FCRA violations
                   </div>
                 )}
               </div>

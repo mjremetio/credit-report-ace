@@ -36,6 +36,7 @@ export interface IStorage {
   createViolation(violation: InsertViolation): Promise<Violation>;
   getViolationsByAccount(negativeAccountId: number): Promise<Violation[]>;
   getViolationsByScan(scanId: number): Promise<Violation[]>;
+  clearViolationsByAccount(negativeAccountId: number): Promise<void>;
 
 }
 
@@ -138,6 +139,10 @@ class DatabaseStorage implements IStorage {
   async getViolationsByAccount(negativeAccountId: number): Promise<Violation[]> {
     return db.select().from(violations).where(eq(violations.negativeAccountId, negativeAccountId));
   }
+  async clearViolationsByAccount(negativeAccountId: number): Promise<void> {
+    await db.delete(violations).where(eq(violations.negativeAccountId, negativeAccountId));
+  }
+
   async getViolationsByScan(scanId: number): Promise<Violation[]> {
     const accts = await this.getNegativeAccountsByScan(scanId);
     const allViolations: Violation[] = [];

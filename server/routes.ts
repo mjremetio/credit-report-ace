@@ -150,7 +150,7 @@ export async function registerRoutes(
       const scan = await storage.createScan({
         consumerName: result.consumerName || "Unknown Consumer",
         status: "in_progress",
-        currentStep: 3,
+        currentStep: 4,
       });
 
       let totalViolations = 0;
@@ -186,9 +186,7 @@ export async function registerRoutes(
             });
             totalViolations++;
           }
-          if (detected.length > 0) {
-            await storage.updateWorkflowStep(negAccount.id, "scanned");
-          }
+          await storage.updateWorkflowStep(negAccount.id, "scanned");
         } catch (violationErr) {
           console.error(`Violation scan failed for account ${negAccount.id}:`, violationErr);
         }
@@ -278,6 +276,9 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const account = await storage.getNegativeAccount(id);
       if (!account) return res.status(404).json({ error: "Account not found" });
+
+      await storage.clearViolationsByAccount(id);
+
       const detectedViolations = await detectViolations(account);
       const savedViolations = [];
       for (const v of detectedViolations) {
@@ -296,7 +297,7 @@ export async function registerRoutes(
       res.json({ violations: savedViolations });
     } catch (error) {
       console.error("Error scanning account:", error);
-      res.status(500).json({ error: "Failed to scan account" });
+      res.status(500).json({ error: "Failed to scan account for violations. Please try again." });
     }
   });
 

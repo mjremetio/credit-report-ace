@@ -58,7 +58,7 @@ AI-powered credit report analysis and dispute workflow platform. Users can uploa
 - `DELETE /api/scans/:scanId/accounts/:id` - Delete account
 
 ### AI Actions
-- `POST /api/accounts/:id/scan` - AI violation detection
+- `POST /api/accounts/:id/scan` - AI violation detection (clears old violations before re-scan)
 
 ## Database Tables
 - `scans` - Workflow sessions
