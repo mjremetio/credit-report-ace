@@ -1,15 +1,13 @@
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
 import {
-  BrainCircuit, ArrowLeft, Shield, FileText, AlertTriangle,
+  Shield, FileText, AlertTriangle,
   Loader2, BarChart3, TrendingUp
 } from "lucide-react";
 import { fetchScans, fetchScan } from "@/lib/api";
 import { useState, useEffect } from "react";
 
 export default function ProfileView() {
-  const [, navigate] = useLocation();
   const [allData, setAllData] = useState<any>(null);
 
   const { data: scans = [], isLoading } = useQuery({
@@ -18,8 +16,14 @@ export default function ProfileView() {
   });
 
   useEffect(() => {
-    if (scans.length === 0) return;
-    Promise.all(scans.map((s: any) => fetchScan(s.id))).then((fullScans) => {
+    if (scans.length === 0) {
+      setAllData({ scans: [], accounts: [], violations: [] });
+      return;
+    }
+    Promise.all(
+      scans.map((s: any) => fetchScan(s.id).catch(() => null))
+    ).then((results) => {
+      const fullScans = results.filter(Boolean);
       const allAccounts: any[] = [];
       const allViolations: any[] = [];
       fullScans.forEach((s: any) => {
@@ -34,7 +38,7 @@ export default function ProfileView() {
 
   if (isLoading || !allData) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -60,20 +64,12 @@ export default function ProfileView() {
   }, {} as Record<string, number>);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-card">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
-          <button data-testid="button-back-from-profile" onClick={() => navigate("/")} className="text-muted-foreground hover:text-white transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-3">
-            <BrainCircuit className="text-primary w-6 h-6" />
-            <h1 className="font-display font-bold text-xl text-white">Profile Clarity View</h1>
-          </div>
-        </div>
+    <div className="h-full">
+      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6">
+        <h2 className="font-display font-medium text-lg text-white">Profile Clarity View</h2>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-3 gap-4">
           <StatCard label="Total Scans" value={totalScans} icon={Shield} />
           <StatCard label="Negative Accounts" value={totalAccounts} icon={FileText} />
@@ -202,7 +198,7 @@ export default function ProfileView() {
             </div>
           </motion.div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

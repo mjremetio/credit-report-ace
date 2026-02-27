@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
-  BrainCircuit, Plus, Trash2, ChevronRight, Shield, FileText,
-  Activity, Loader2, User, BarChart3, Eye
+  Plus, Trash2, ChevronRight, Shield,
+  Loader2, User
 } from "lucide-react";
 import { fetchScans, createScan, deleteScan } from "@/lib/api";
 
@@ -41,37 +41,20 @@ export default function Home() {
   const stepLabels = ["Start", "Add Accounts", "Classify", "Next Steps"];
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-card">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <BrainCircuit className="text-primary w-7 h-7" />
-            <h1 className="font-display font-bold text-2xl tracking-wider text-white">
-              LEXA <span className="text-primary text-sm font-mono ml-1">v2.4</span>
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              data-testid="link-profile"
-              onClick={() => navigate("/profile")}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary border border-border text-muted-foreground hover:text-white transition-colors font-mono text-sm"
-            >
-              <Eye className="w-4 h-4" />
-              Profile Clarity
-            </button>
-            <button
-              data-testid="button-new-scan"
-              onClick={() => setShowNewScan(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black font-medium hover:bg-primary/90 transition-colors text-sm"
-            >
-              <Plus className="w-4 h-4" />
-              New Scan
-            </button>
-          </div>
-        </div>
+    <div className="h-full">
+      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6 justify-between">
+        <h2 className="font-display font-medium text-lg text-white">Manual Workflow</h2>
+        <button
+          data-testid="button-new-scan"
+          onClick={() => setShowNewScan(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black font-medium hover:bg-primary/90 transition-colors text-sm"
+        >
+          <Plus className="w-4 h-4" />
+          New Scan
+        </button>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <div className="p-6">
         <AnimatePresence>
           {showNewScan && (
             <motion.div
@@ -130,7 +113,7 @@ export default function Home() {
             </div>
             <h2 className="font-display text-2xl text-white mb-3">No Active Scans</h2>
             <p className="text-muted-foreground font-mono text-sm max-w-md mx-auto mb-8">
-              Start a new scan to begin analyzing your credit report for potential FCRA violations.
+              Start a new scan to manually enter and analyze negative credit accounts for potential FCRA violations.
             </p>
             <button
               data-testid="button-empty-new-scan"
@@ -210,7 +193,7 @@ export default function Home() {
             ))}
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

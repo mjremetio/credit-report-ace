@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import {
-  BrainCircuit, ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
-  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye
+  ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
+  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
@@ -52,7 +52,7 @@ export default function ScanWizard() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -60,7 +60,7 @@ export default function ScanWizard() {
 
   if (!scan) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <h2 className="font-display text-xl text-white mb-2">Scan Not Found</h2>
           <button onClick={() => navigate("/")} className="text-primary font-mono text-sm hover:underline">Go Home</button>
@@ -70,52 +70,47 @@ export default function ScanWizard() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-card">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button data-testid="button-back-home" onClick={() => navigate("/")} className="text-muted-foreground hover:text-white transition-colors">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-3">
-              <BrainCircuit className="text-primary w-6 h-6" />
-              <h1 className="font-display font-bold text-xl text-white">{scan.consumerName}</h1>
+    <div className="h-full">
+      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6 justify-between">
+        <div className="flex items-center gap-4">
+          <button data-testid="button-back-home" onClick={() => navigate("/")} className="text-muted-foreground hover:text-white transition-colors">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h2 className="font-display font-medium text-lg text-white">{scan.consumerName}</h2>
+        </div>
+        <div className="flex items-center gap-1">
+          {STEPS.map((s, i) => (
+            <div key={s.num} className="flex items-center">
+              <button
+                data-testid={`step-indicator-${s.num}`}
+                onClick={() => goToStep(s.num)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all ${
+                  step === s.num
+                    ? "bg-primary text-black"
+                    : s.num < step
+                    ? "bg-primary/20 text-primary"
+                    : "bg-secondary text-muted-foreground"
+                }`}
+              >
+                <s.icon className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">{s.label}</span>
+              </button>
+              {i < STEPS.length - 1 && (
+                <div className={`w-6 h-0.5 mx-1 ${s.num < step ? "bg-primary" : "bg-border"}`} />
+              )}
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            {STEPS.map((s, i) => (
-              <div key={s.num} className="flex items-center">
-                <button
-                  data-testid={`step-indicator-${s.num}`}
-                  onClick={() => goToStep(s.num)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all ${
-                    step === s.num
-                      ? "bg-primary text-black"
-                      : s.num < step
-                      ? "bg-primary/20 text-primary"
-                      : "bg-secondary text-muted-foreground"
-                  }`}
-                >
-                  <s.icon className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">{s.label}</span>
-                </button>
-                {i < STEPS.length - 1 && (
-                  <div className={`w-6 h-0.5 mx-1 ${s.num < step ? "bg-primary" : "bg-border"}`} />
-                )}
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-5xl mx-auto px-6 py-8">
         <AnimatePresence mode="wait">
           {step === 1 && <Step1Welcome key="s1" scan={scan} goToStep={goToStep} />}
           {step === 2 && <Step2AddAccounts key="s2" scan={scan} scanId={scanId} goToStep={goToStep} />}
           {step === 3 && <Step3Classify key="s3" scan={scan} scanId={scanId} goToStep={goToStep} />}
           {step === 4 && <Step4NextSteps key="s4" scan={scan} scanId={scanId} goToStep={goToStep} navigate={navigate} />}
         </AnimatePresence>
-      </main>
+      </div>
     </div>
   );
 }
