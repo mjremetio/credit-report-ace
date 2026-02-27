@@ -1,0 +1,34 @@
+MVP Features
+1. Negative Account Input
+Users paste or enter negative accounts from their existing credit reports into the system so everything is organized in one central place.
+2. Account Classification
+Each negative account is categorized into one of three types:
+
+Debt Collection
+Charge-Off
+Repossession
+
+3. Violation Detection / Spotting
+The software scans the account details for potential reporting issues — things that are inaccurate, incomplete, or inconsistently reported and could be challenged under FCRA.
+4. Guided Letter Generation
+Generates ready-to-send, professionally structured dispute letters tailored to each account type. Letters are editable before sending.
+5. Step-by-Step Workflow System
+Each account moves through a clear, repeatable workflow — classify → generate → respond — so users always know what the next action is.
+6. Multiple Letter Types
+Supports different letter templates for Debt Collection, Charge-Off, and Repossession scenarios.
+7. Profile Clarity View
+Turns confusing credit data into a clear, organized summary so users can see what's being reported and where potential issues exist.
+
+⚙️ How It Works (Step by Step)
+Step 1 — Start a Scan
+User visits the platform and initiates a new scan via the /letter-generator page.
+Step 2 — Add Negative Accounts
+User brings their existing credit reports and pastes in the negative items they want to address. No automatic credit pull — user-supplied data.
+Step 3 — Classify Each Account
+User tells the system what type each account is (Debt Collection, Charge-Off, or Repossession) and enters key details used to personalize the workflow.
+Step 4 — Generate Workflow Letters
+The software produces tailored letters based on the account type and details, using guided language and structured templates.
+Step 5 — Review & Send
+User reviews the generated letters, edits as needed, and sends them out themselves. The user stays fully in control throughout.
+Step 6 — Follow the Workflow
+Each account has clear "next steps" within the workflow, so users can track progress and know what to do after sending the initial letter.
