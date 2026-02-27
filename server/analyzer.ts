@@ -123,9 +123,10 @@ Return ONLY valid JSON matching this exact structure:
 Be thorough but precise. Only flag genuine discrepancies and potential violations. Do not flag accurate negative information as a violation. Do not invent accounts or data points that are not present in the provided text.`;
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse();
-  const data = await parser.parseBuffer(buffer);
-  const text = data.pages.map(p => p.text).join(" ");
+  const parser = new PDFParse({ data: buffer });
+  const result = await parser.getText();
+  await parser.destroy();
+  const text = result.pages.map((p: any) => p.text).join(" ");
   return text.replace(/\s+/g, " ").trim().slice(0, 60000);
 }
 
