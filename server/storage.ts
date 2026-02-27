@@ -1,38 +1,66 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import { reports, findings, accounts, type Report, type InsertReport, type Finding, type InsertFinding, type Account, type InsertAccount } from "@shared/schema";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  createReport(report: InsertReport): Promise<Report>;
+  getReport(id: number): Promise<Report | undefined>;
+  getAllReports(): Promise<Report[]>;
+  updateReportStatus(id: number, status: string, consumerName?: string): Promise<Report | undefined>;
+  deleteReport(id: number): Promise<void>;
+
+  createFinding(finding: InsertFinding): Promise<Finding>;
+  getFindingsByReport(reportId: number): Promise<Finding[]>;
+
+  createAccount(account: InsertAccount): Promise<Account>;
+  getAccountsByReport(reportId: number): Promise<Account[]>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+class DatabaseStorage implements IStorage {
+  async createReport(report: InsertReport): Promise<Report> {
+    const [created] = await db.insert(reports).values(report).returning();
+    return created;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getReport(id: number): Promise<Report | undefined> {
+    const [report] = await db.select().from(reports).where(eq(reports.id, id));
+    return report;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async getAllReports(): Promise<Report[]> {
+    return db.select().from(reports).orderBy(desc(reports.createdAt));
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async updateReportStatus(id: number, status: string, consumerName?: string): Promise<Report | undefined> {
+    const values: any = { status };
+    if (consumerName) values.consumerName = consumerName;
+    const [updated] = await db.update(reports).set(values).where(eq(reports.id, id)).returning();
+    return updated;
+  }
+
+  async deleteReport(id: number): Promise<void> {
+    await db.delete(findings).where(eq(findings.reportId, id));
+    await db.delete(accounts).where(eq(accounts.reportId, id));
+    await db.delete(reports).where(eq(reports.id, id));
+  }
+
+  async createFinding(finding: InsertFinding): Promise<Finding> {
+    const [created] = await db.insert(findings).values(finding).returning();
+    return created;
+  }
+
+  async getFindingsByReport(reportId: number): Promise<Finding[]> {
+    return db.select().from(findings).where(eq(findings.reportId, reportId));
+  }
+
+  async createAccount(account: InsertAccount): Promise<Account> {
+    const [created] = await db.insert(accounts).values(account).returning();
+    return created;
+  }
+
+  async getAccountsByReport(reportId: number): Promise<Account[]> {
+    return db.select().from(accounts).where(eq(accounts.reportId, reportId));
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
