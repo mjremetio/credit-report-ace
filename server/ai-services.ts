@@ -4,6 +4,8 @@ import type { NegativeAccount } from "@shared/schema";
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  timeout: 300_000, // 5 minutes per request
+  maxRetries: 2,
 });
 
 export interface DetectedViolation {
@@ -160,7 +162,7 @@ export async function detectViolations(account: NegativeAccount, clientState?: s
         { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations:\n\n${accountDetails}` }
       ],
       response_format: { type: "json_object" },
-      max_completion_tokens: 4096,
+      max_completion_tokens: 8192,
     });
   } catch (err: any) {
     console.error("AI service error during violation detection:", err?.message || err);

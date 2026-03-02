@@ -15,6 +15,7 @@ const createScanSchema = z.object({
 const updateScanSchema = z.object({
   currentStep: z.number().int().min(1).max(4).optional(),
   status: z.enum(["in_progress", "completed"]).optional(),
+  reviewStatus: z.enum(["pending", "in_progress", "approved", "exported"]).optional(),
   clientName: z.string().optional().nullable(),
   clientState: z.string().optional().nullable(),
   scanNotes: z.string().optional().nullable(),
@@ -70,15 +71,21 @@ const reportMetadataSchema = z.object({
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB max for images
   fileFilter: (_req, file, cb) => {
-    const allowed = ["text/html", "application/pdf", "text/plain", "text/csv"];
-    const allowedExtensions = [".html", ".htm", ".pdf", ".txt", ".csv"];
+    const allowed = [
+      "text/html", "application/pdf", "text/plain", "text/csv",
+      "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif",
+    ];
+    const allowedExtensions = [
+      ".html", ".htm", ".pdf", ".txt", ".csv",
+      ".png", ".jpg", ".jpeg", ".webp", ".gif",
+    ];
     const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf("."));
     if (allowed.includes(file.mimetype) || allowedExtensions.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Only HTML, PDF, and text files are supported"));
+      cb(new Error("Supported formats: HTML, PDF, TXT, CSV, PNG, JPG, WEBP, GIF"));
     }
   },
 });
@@ -149,6 +156,7 @@ export async function registerRoutes(
       }
       // Handle additional scan fields
       const extraUpdates: Record<string, any> = {};
+      if (parsed.data.reviewStatus !== undefined) extraUpdates.reviewStatus = parsed.data.reviewStatus;
       if (parsed.data.clientName !== undefined) extraUpdates.clientName = parsed.data.clientName;
       if (parsed.data.clientState !== undefined) extraUpdates.clientState = parsed.data.clientState;
       if (parsed.data.scanNotes !== undefined) extraUpdates.scanNotes = parsed.data.scanNotes;
@@ -180,11 +188,13 @@ export async function registerRoutes(
       const ext = req.file.originalname.toLowerCase();
       const isPdf = ext.endsWith(".pdf") || req.file.mimetype === "application/pdf";
       const isHtml = ext.endsWith(".html") || ext.endsWith(".htm");
-      const fileType = isPdf ? "application/pdf" : isHtml ? "text/html" : "text/plain";
-      const fileContent = isPdf ? "" : req.file.buffer.toString("utf-8");
+      const isImage = /\.(png|jpg|jpeg|webp|gif)$/.test(ext) || req.file.mimetype?.startsWith("image/");
+      const fileType = isPdf ? "application/pdf" : isHtml ? "text/html" : isImage ? req.file.mimetype : "text/plain";
+      const fileContent = (isPdf || isImage) ? "" : req.file.buffer.toString("utf-8");
       const pdfBuffer = isPdf ? req.file.buffer : undefined;
+      const imageBuffer = isImage ? req.file.buffer : undefined;
 
-      const result = await analyzeReport(fileContent, fileType, pdfBuffer);
+      const result = await analyzeReport(fileContent, fileType, pdfBuffer, imageBuffer);
 
       const scan = await storage.createScan({
         consumerName: result.consumerName || "Unknown Consumer",
@@ -196,6 +206,46 @@ export async function registerRoutes(
 
       for (const acct of result.accounts) {
         const accountType = mapAccountType(acct.type, acct.status);
+
+        // Build comprehensive raw details including per-bureau data
+        const relatedFindings = result.findings
+          .filter(f => f.creditor && acct.creditor && f.creditor.toLowerCase().includes(acct.creditor.toLowerCase().slice(0, 10)))
+          .map(f => `[${f.severity?.toUpperCase()}] ${f.findingType}: ${f.explanation}`)
+          .join("\n");
+
+        const bureauLines: string[] = [];
+        if (acct.bureauDetails && acct.bureauDetails.length > 0) {
+          for (const bd of acct.bureauDetails) {
+            const fields = [
+              `  Bureau: ${bd.bureau}`,
+              bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
+              bd.balance != null ? `  Balance: $${bd.balance}` : null,
+              bd.status ? `  Status: ${bd.status}` : null,
+              bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
+              bd.lastPayment ? `  Last Payment: ${bd.lastPayment}` : null,
+              bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
+              bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
+              bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
+              bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
+              bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
+            ].filter(Boolean).join("\n");
+            bureauLines.push(fields);
+          }
+        }
+
+        const rawDetails = [
+          `Creditor: ${acct.creditor}`,
+          acct.accountNumberMasked ? `Account: ${acct.accountNumberMasked}` : null,
+          `Type: ${acct.type}`,
+          `Status: ${acct.status}`,
+          acct.balance != null ? `Balance: $${acct.balance}` : null,
+          acct.dates?.dofd ? `DOFD: ${acct.dates.dofd}` : null,
+          acct.dates?.last_payment ? `Last Payment: ${acct.dates.last_payment}` : null,
+          acct.bureaus ? `Bureaus: ${acct.bureaus}` : null,
+          bureauLines.length > 0 ? `\nPer-Bureau Details:\n${bureauLines.join("\n---\n")}` : null,
+          relatedFindings ? `\nAI Findings:\n${relatedFindings}` : null,
+        ].filter(Boolean).join("\n");
+
         const negAccount = await storage.createNegativeAccount({
           scanId: scan.id,
           creditor: acct.creditor,
@@ -206,8 +256,8 @@ export async function registerRoutes(
           dateOpened: acct.dates?.last_payment || null,
           dateOfDelinquency: acct.dates?.dofd || null,
           status: acct.status || null,
-          bureaus: null,
-          rawDetails: null,
+          bureaus: acct.bureaus || null,
+          rawDetails,
           workflowStep: "classified",
         });
 
@@ -242,6 +292,7 @@ export async function registerRoutes(
         consumerName: result.consumerName,
         accountsCreated: result.accounts.length,
         violationsFound: totalViolations,
+        findingsDetected: result.findings.length,
       });
     } catch (error: any) {
       console.error("Upload scan error:", error);
