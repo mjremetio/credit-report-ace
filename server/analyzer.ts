@@ -120,6 +120,46 @@ Return ONLY valid JSON matching this exact structure:
   ]
 }
 
+In addition to FCRA reporting violations, analyze the report for DEBT COLLECTOR CONDUCT VIOLATIONS under the Fair Debt Collection Practices Act (FDCPA) and related state laws.
+
+For each violation found, also return:
+- category: "FCRA_REPORTING" for FCRA violations, or specific FDCPA category
+- evidence_required: What documentation is needed
+- confidence: "confirmed" | "likely" | "possible"
+- cro_reminder: Reminder for CRO analyst
+
+DEBT COLLECTOR VIOLATIONS TO CHECK:
+
+1. DEBT_COLLECTOR_DISCLOSURE (High)
+   Flag if written communications lack the "mini-Miranda" disclosure.
+   Evidence: Letters, emails, texts, voicemail transcripts lacking disclosure.
+
+2. CA_LICENSE_MISSING (High) — CALIFORNIA ONLY
+   Flag if collector correspondence lacks California debt collector license number.
+   Evidence: Correspondence missing license number.
+
+3. CEASE_CONTACT_VIOLATION (Critical)
+   Flag if client sent written stop request, proof collector received it, and contact continued.
+   Evidence: Stop letter, delivery proof, subsequent contact docs.
+
+4. INCONVENIENT_CONTACT (High)
+   Flag if calls before 8 AM / after 9 PM, calls to workplace, or continued after inconvenient request.
+   Evidence: Recorded calls, call logs with timestamps.
+
+5. THIRD_PARTY_DISCLOSURE (Critical)
+   Flag if collector contacted spouse/family/employer/friend and disclosed the debt.
+   Evidence: Third-party statements, call logs, misdirected correspondence.
+
+6. HARASSMENT_EXCESSIVE_CALLS (High)
+   Flag if 7+ calls in 7 days, 3+ calls same day, back-to-back calls, threatening language.
+   Evidence: Call logs, history screenshots, recordings.
+
+Extended findings format (add these fields to each finding):
+- "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS"
+- "evidence_required": "Description of documentation needed"
+- "confidence": "confirmed|likely|possible"
+- "cro_reminder": "Reminder for CRO analyst"
+
 Be thorough but precise. Only flag genuine discrepancies and potential violations. Do not flag accurate negative information as a violation. Do not invent accounts or data points that are not present in the provided text.`;
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {

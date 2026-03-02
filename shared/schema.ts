@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, serial, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -46,6 +46,18 @@ export const scans = pgTable("scans", {
   status: text("status").notNull().default("in_progress"),
   currentStep: integer("current_step").notNull().default(1),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  // Review gate fields
+  clientName: text("client_name"),
+  clientState: text("client_state"),
+  reportGeneratedAt: timestamp("report_generated_at"),
+  reportTitle: text("report_title"),
+  scanNotes: text("scan_notes"),
+  reviewStatus: text("review_status").default("pending"),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  approvedViolationCount: integer("approved_violation_count"),
+  rejectedViolationCount: integer("rejected_violation_count"),
 });
 
 export const negativeAccounts = pgTable("negative_accounts", {
@@ -75,6 +87,20 @@ export const violations = pgTable("violations", {
   evidence: text("evidence"),
   matchedRule: text("matched_rule"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  // FDCPA / Debt collector fields
+  category: text("category"),
+  evidenceRequired: text("evidence_required"),
+  evidenceProvided: boolean("evidence_provided").default(false),
+  evidenceNotes: text("evidence_notes"),
+  confidence: text("confidence"),
+  croReminder: text("cro_reminder"),
+  // Human review fields
+  reviewStatus: text("review_status").default("pending"),
+  reviewerNotes: text("reviewer_notes"),
+  severityOverride: text("severity_override"),
+  descriptionOverride: text("description_override"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: text("reviewed_by"),
 });
 
 export const letters = pgTable("letters", {

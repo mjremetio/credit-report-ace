@@ -11,7 +11,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
 
   const isActive = (path: string) => {
-    if (path === "/") return location === "/" || location.startsWith("/scan/");
+    if (path === "/") return location === "/" || location.startsWith("/scan/") || location.startsWith("/review/");
     return location === path;
   };
 

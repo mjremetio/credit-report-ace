@@ -24,6 +24,7 @@ export interface IStorage {
   getAllScans(): Promise<Scan[]>;
   updateScanStep(id: number, step: number): Promise<Scan | undefined>;
   updateScanStatus(id: number, status: string): Promise<Scan | undefined>;
+  updateScan(id: number, data: Partial<Scan>): Promise<Scan | undefined>;
   deleteScan(id: number): Promise<void>;
 
   createNegativeAccount(account: InsertNegativeAccount): Promise<NegativeAccount>;
@@ -34,10 +35,11 @@ export interface IStorage {
   deleteNegativeAccount(id: number): Promise<void>;
 
   createViolation(violation: InsertViolation): Promise<Violation>;
+  getViolation(id: number): Promise<Violation | undefined>;
   getViolationsByAccount(negativeAccountId: number): Promise<Violation[]>;
   getViolationsByScan(scanId: number): Promise<Violation[]>;
   clearViolationsByAccount(negativeAccountId: number): Promise<void>;
-
+  updateViolation(id: number, data: Partial<Violation>): Promise<Violation | undefined>;
 }
 
 class DatabaseStorage implements IStorage {
@@ -97,6 +99,10 @@ class DatabaseStorage implements IStorage {
     const [updated] = await db.update(scans).set({ status }).where(eq(scans.id, id)).returning();
     return updated;
   }
+  async updateScan(id: number, data: Partial<Scan>): Promise<Scan | undefined> {
+    const [updated] = await db.update(scans).set(data).where(eq(scans.id, id)).returning();
+    return updated;
+  }
   async deleteScan(id: number): Promise<void> {
     const accts = await this.getNegativeAccountsByScan(id);
     for (const a of accts) {
@@ -136,11 +142,19 @@ class DatabaseStorage implements IStorage {
     const [created] = await db.insert(violations).values(violation).returning();
     return created;
   }
+  async getViolation(id: number): Promise<Violation | undefined> {
+    const [violation] = await db.select().from(violations).where(eq(violations.id, id));
+    return violation;
+  }
   async getViolationsByAccount(negativeAccountId: number): Promise<Violation[]> {
     return db.select().from(violations).where(eq(violations.negativeAccountId, negativeAccountId));
   }
   async clearViolationsByAccount(negativeAccountId: number): Promise<void> {
     await db.delete(violations).where(eq(violations.negativeAccountId, negativeAccountId));
+  }
+  async updateViolation(id: number, data: Partial<Violation>): Promise<Violation | undefined> {
+    const [updated] = await db.update(violations).set(data).where(eq(violations.id, id)).returning();
+    return updated;
   }
 
   async getViolationsByScan(scanId: number): Promise<Violation[]> {

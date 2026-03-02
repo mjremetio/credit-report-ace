@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   Plus, Trash2, ChevronRight, Shield,
-  Loader2, User
+  Loader2, User, CheckCircle2, Eye
 } from "lucide-react";
 import { fetchScans, createScan, deleteScan } from "@/lib/api";
 
@@ -20,7 +20,7 @@ export default function Home() {
   });
 
   const createMutation = useMutation({
-    mutationFn: createScan,
+    mutationFn: (name: string) => createScan(name),
     onSuccess: (scan) => {
       queryClient.invalidateQueries({ queryKey: ["scans"] });
       navigate(`/scan/${scan.id}`);
@@ -154,17 +154,33 @@ export default function Home() {
                         <span className="text-xs font-mono text-muted-foreground">
                           {new Date(scan.createdAt).toLocaleDateString()}
                         </span>
-                        <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                          scan.status === "completed" ? "border-green-500/30 text-green-400 bg-green-500/10" :
-                          scan.status === "in_progress" ? "border-primary/30 text-primary bg-primary/10" :
-                          "border-border text-muted-foreground bg-secondary"
-                        }`}>
-                          {scan.status === "in_progress" ? "In Progress" : scan.status}
-                        </span>
+                        <ScanStatusBadge status={scan.status} reviewStatus={scan.reviewStatus} />
+                        {scan.reviewedAt && (
+                          <span className="text-xs font-mono text-muted-foreground">
+                            Reviewed: {new Date(scan.reviewedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                        {scan.clientState && (
+                          <span className="text-xs font-mono text-muted-foreground">{scan.clientState}</span>
+                        )}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
+                    {/* Review button for completed scans */}
+                    {scan.status === "completed" && scan.reviewStatus !== "approved" && scan.reviewStatus !== "exported" && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); navigate(`/review/${scan.id}`); }}
+                        className="px-3 py-1.5 bg-primary text-black font-medium rounded-lg text-xs inline-flex items-center gap-1 hover:bg-primary/90 transition-colors"
+                      >
+                        <Eye className="w-3 h-3" /> Review
+                      </button>
+                    )}
+                    {(scan.reviewStatus === "approved" || scan.reviewStatus === "exported") && (
+                      <span className="text-xs font-mono text-green-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Approved
+                      </span>
+                    )}
                     <div className="hidden md:flex items-center gap-1">
                       {stepLabels.map((label, i) => (
                         <div key={i} className="flex items-center">
@@ -195,5 +211,31 @@ export default function Home() {
         )}
       </div>
     </div>
+  );
+}
+
+function ScanStatusBadge({ status, reviewStatus }: { status: string; reviewStatus?: string }) {
+  if (reviewStatus === "approved" || reviewStatus === "exported") {
+    return (
+      <span className="text-xs font-mono px-2 py-0.5 rounded border border-green-500/30 text-green-400 bg-green-500/10">
+        approved
+      </span>
+    );
+  }
+  if (reviewStatus === "in_progress") {
+    return (
+      <span className="text-xs font-mono px-2 py-0.5 rounded border border-purple-500/30 text-purple-400 bg-purple-500/10">
+        under review
+      </span>
+    );
+  }
+  const colors: Record<string, string> = {
+    completed: "border-green-500/30 text-green-400 bg-green-500/10",
+    in_progress: "border-primary/30 text-primary bg-primary/10",
+  };
+  return (
+    <span className={`text-xs font-mono px-2 py-0.5 rounded border ${colors[status] || "border-border text-muted-foreground bg-secondary"}`}>
+      {status === "in_progress" ? "In Progress" : status}
+    </span>
   );
 }
