@@ -151,15 +151,21 @@ Be thorough but precise. Only flag genuine potential issues. If the account deta
 export async function detectViolations(account: NegativeAccount, clientState?: string | null): Promise<DetectedViolation[]> {
   const accountDetails = buildAccountDescription(account, clientState);
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-5.2",
-    messages: [
-      { role: "system", content: VIOLATION_SYSTEM_PROMPT },
-      { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations:\n\n${accountDetails}` }
-    ],
-    response_format: { type: "json_object" },
-    max_completion_tokens: 4096,
-  });
+  let response;
+  try {
+    response = await openai.chat.completions.create({
+      model: "gpt-5.2",
+      messages: [
+        { role: "system", content: VIOLATION_SYSTEM_PROMPT },
+        { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations:\n\n${accountDetails}` }
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 4096,
+    });
+  } catch (err: any) {
+    console.error("AI service error during violation detection:", err?.message || err);
+    throw new Error("AI violation detection service is temporarily unavailable. Please try again in a moment.");
+  }
 
   const raw = response.choices[0]?.message?.content || "{}";
   try {
