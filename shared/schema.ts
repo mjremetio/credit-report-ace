@@ -103,6 +103,35 @@ export const violations = pgTable("violations", {
   reviewedBy: text("reviewed_by"),
 });
 
+// ── Parsed Credit Report (system of record JSON) ──────────────────
+export const parsedReports = pgTable("parsed_reports", {
+  id: serial("id").primaryKey(),
+  scanId: integer("scan_id").notNull().references(() => scans.id, { onDelete: "cascade" }),
+  reportJson: jsonb("report_json").notNull(),         // Full ParsedCreditReport JSON
+  profileJson: jsonb("profile_json"),                  // CreditReportProfile subset
+  issueFlagsJson: jsonb("issue_flags_json"),            // IssueFlag[] from rule engine
+  summaryJson: jsonb("summary_json"),                  // ReportSummary
+  sourceFileName: text("source_file_name"),
+  sourceFileType: text("source_file_type"),
+  parserVersion: text("parser_version").default("2.0.0"),
+  tradelineCount: integer("tradeline_count").default(0),
+  issueFlagCount: integer("issue_flag_count").default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// ── Per-tradeline evidence store (structured JSON + raw text) ──────
+export const tradelineEvidence = pgTable("tradeline_evidence", {
+  id: serial("id").primaryKey(),
+  parsedReportId: integer("parsed_report_id").notNull().references(() => parsedReports.id, { onDelete: "cascade" }),
+  creditorName: text("creditor_name").notNull(),
+  accountNumberMasked: text("account_number_masked"),
+  tradelineJson: jsonb("tradeline_json").notNull(),    // Tradeline structured JSON
+  evidenceText: text("evidence_text").notNull(),        // Raw text that was extracted
+  bureaus: text("bureaus"),                              // Comma-separated bureau names
+  issueFlagsJson: jsonb("issue_flags_json"),             // IssueFlag[] for this tradeline only
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const letters = pgTable("letters", {
   id: serial("id").primaryKey(),
   negativeAccountId: integer("negative_account_id").notNull().references(() => negativeAccounts.id, { onDelete: "cascade" }),
@@ -119,6 +148,8 @@ export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true 
 export const insertScanSchema = createInsertSchema(scans).omit({ id: true, createdAt: true });
 export const insertNegativeAccountSchema = createInsertSchema(negativeAccounts).omit({ id: true, createdAt: true });
 export const insertViolationSchema = createInsertSchema(violations).omit({ id: true, createdAt: true });
+export const insertParsedReportSchema = createInsertSchema(parsedReports).omit({ id: true, createdAt: true });
+export const insertTradelineEvidenceSchema = createInsertSchema(tradelineEvidence).omit({ id: true, createdAt: true });
 export const insertLetterSchema = createInsertSchema(letters).omit({ id: true, createdAt: true });
 
 export type Report = typeof reports.$inferSelect;
@@ -133,5 +164,9 @@ export type NegativeAccount = typeof negativeAccounts.$inferSelect;
 export type InsertNegativeAccount = z.infer<typeof insertNegativeAccountSchema>;
 export type Violation = typeof violations.$inferSelect;
 export type InsertViolation = z.infer<typeof insertViolationSchema>;
+export type ParsedReport = typeof parsedReports.$inferSelect;
+export type InsertParsedReport = z.infer<typeof insertParsedReportSchema>;
+export type TradelineEvidence = typeof tradelineEvidence.$inferSelect;
+export type InsertTradelineEvidence = z.infer<typeof insertTradelineEvidenceSchema>;
 export type Letter = typeof letters.$inferSelect;
 export type InsertLetter = z.infer<typeof insertLetterSchema>;

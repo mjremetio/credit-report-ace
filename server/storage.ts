@@ -1,10 +1,13 @@
 import { db } from "./db";
 import {
   reports, findings, accounts, scans, negativeAccounts, violations, letters,
+  parsedReports, tradelineEvidence,
   type Report, type InsertReport, type Finding, type InsertFinding,
   type Account, type InsertAccount, type Scan, type InsertScan,
   type NegativeAccount, type InsertNegativeAccount,
-  type Violation, type InsertViolation
+  type Violation, type InsertViolation,
+  type ParsedReport, type InsertParsedReport,
+  type TradelineEvidence, type InsertTradelineEvidence,
 } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -40,6 +43,15 @@ export interface IStorage {
   getViolationsByScan(scanId: number): Promise<Violation[]>;
   clearViolationsByAccount(negativeAccountId: number): Promise<void>;
   updateViolation(id: number, data: Partial<Violation>): Promise<Violation | undefined>;
+
+  // Parsed report storage
+  createParsedReport(report: InsertParsedReport): Promise<ParsedReport>;
+  getParsedReport(id: number): Promise<ParsedReport | undefined>;
+  getParsedReportByScan(scanId: number): Promise<ParsedReport | undefined>;
+  updateParsedReportFlags(id: number, flags: any[]): Promise<ParsedReport | undefined>;
+  updateParsedReportSummary(id: number, summary: any): Promise<ParsedReport | undefined>;
+  createTradelineEvidence(evidence: InsertTradelineEvidence): Promise<TradelineEvidence>;
+  getTradelineEvidenceByScan(parsedReportId: number): Promise<TradelineEvidence[]>;
 }
 
 class DatabaseStorage implements IStorage {
@@ -165,6 +177,48 @@ class DatabaseStorage implements IStorage {
       allViolations.push(...v);
     }
     return allViolations;
+  }
+
+  // ── Parsed Report Storage ──────────────────────────────────────────
+
+  async createParsedReport(report: InsertParsedReport): Promise<ParsedReport> {
+    const [created] = await db.insert(parsedReports).values(report).returning();
+    return created;
+  }
+
+  async getParsedReport(id: number): Promise<ParsedReport | undefined> {
+    const [report] = await db.select().from(parsedReports).where(eq(parsedReports.id, id));
+    return report;
+  }
+
+  async getParsedReportByScan(scanId: number): Promise<ParsedReport | undefined> {
+    const [report] = await db.select().from(parsedReports).where(eq(parsedReports.scanId, scanId)).orderBy(desc(parsedReports.createdAt));
+    return report;
+  }
+
+  async updateParsedReportFlags(id: number, flags: any[]): Promise<ParsedReport | undefined> {
+    const [updated] = await db.update(parsedReports)
+      .set({ issueFlagsJson: flags, issueFlagCount: flags.length })
+      .where(eq(parsedReports.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateParsedReportSummary(id: number, summary: any): Promise<ParsedReport | undefined> {
+    const [updated] = await db.update(parsedReports)
+      .set({ summaryJson: summary })
+      .where(eq(parsedReports.id, id))
+      .returning();
+    return updated;
+  }
+
+  async createTradelineEvidence(evidence: InsertTradelineEvidence): Promise<TradelineEvidence> {
+    const [created] = await db.insert(tradelineEvidence).values(evidence).returning();
+    return created;
+  }
+
+  async getTradelineEvidenceByScan(parsedReportId: number): Promise<TradelineEvidence[]> {
+    return db.select().from(tradelineEvidence).where(eq(tradelineEvidence.parsedReportId, parsedReportId)).orderBy(tradelineEvidence.createdAt);
   }
 
 }

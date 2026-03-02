@@ -5,6 +5,7 @@ import { z } from "zod";
 import { storage } from "./storage";
 import { analyzeReport } from "./analyzer";
 import { detectViolations } from "./ai-services";
+import { runReportPipeline } from "./report-pipeline";
 
 const createScanSchema = z.object({
   consumerName: z.string().min(1, "consumerName is required"),
@@ -182,6 +183,7 @@ export async function registerRoutes(
     }
   });
 
+  // ========== NEW PIPELINE: Parse → Normalize → Flag → Summarize ==========
   app.post("/api/scans/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -194,105 +196,29 @@ export async function registerRoutes(
       const pdfBuffer = isPdf ? req.file.buffer : undefined;
       const imageBuffer = isImage ? req.file.buffer : undefined;
 
-      const result = await analyzeReport(fileContent, fileType, pdfBuffer, imageBuffer);
-
-      const scan = await storage.createScan({
-        consumerName: result.consumerName || "Unknown Consumer",
-        status: "in_progress",
-        currentStep: 4,
-      });
-
-      let totalViolations = 0;
-
-      for (const acct of result.accounts) {
-        const accountType = mapAccountType(acct.type, acct.status);
-
-        // Build comprehensive raw details including per-bureau data
-        const relatedFindings = result.findings
-          .filter(f => f.creditor && acct.creditor && f.creditor.toLowerCase().includes(acct.creditor.toLowerCase().slice(0, 10)))
-          .map(f => `[${f.severity?.toUpperCase()}] ${f.findingType}: ${f.explanation}`)
-          .join("\n");
-
-        const bureauLines: string[] = [];
-        if (acct.bureauDetails && acct.bureauDetails.length > 0) {
-          for (const bd of acct.bureauDetails) {
-            const fields = [
-              `  Bureau: ${bd.bureau}`,
-              bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
-              bd.balance != null ? `  Balance: $${bd.balance}` : null,
-              bd.status ? `  Status: ${bd.status}` : null,
-              bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
-              bd.lastPayment ? `  Last Payment: ${bd.lastPayment}` : null,
-              bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
-              bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
-              bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
-              bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
-              bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
-            ].filter(Boolean).join("\n");
-            bureauLines.push(fields);
-          }
-        }
-
-        const rawDetails = [
-          `Creditor: ${acct.creditor}`,
-          acct.accountNumberMasked ? `Account: ${acct.accountNumberMasked}` : null,
-          `Type: ${acct.type}`,
-          `Status: ${acct.status}`,
-          acct.balance != null ? `Balance: $${acct.balance}` : null,
-          acct.dates?.dofd ? `DOFD: ${acct.dates.dofd}` : null,
-          acct.dates?.last_payment ? `Last Payment: ${acct.dates.last_payment}` : null,
-          acct.bureaus ? `Bureaus: ${acct.bureaus}` : null,
-          bureauLines.length > 0 ? `\nPer-Bureau Details:\n${bureauLines.join("\n---\n")}` : null,
-          relatedFindings ? `\nAI Findings:\n${relatedFindings}` : null,
-        ].filter(Boolean).join("\n");
-
-        const negAccount = await storage.createNegativeAccount({
-          scanId: scan.id,
-          creditor: acct.creditor,
-          accountNumber: acct.accountNumberMasked || null,
-          accountType,
-          originalCreditor: null,
-          balance: acct.balance || null,
-          dateOpened: acct.dates?.last_payment || null,
-          dateOfDelinquency: acct.dates?.dofd || null,
-          status: acct.status || null,
-          bureaus: acct.bureaus || null,
-          rawDetails,
-          workflowStep: "classified",
-        });
-
-        try {
-          const detected = await detectViolations(negAccount, scan.clientState);
-          for (const v of detected) {
-            await storage.createViolation({
-              negativeAccountId: negAccount.id,
-              violationType: v.violationType,
-              severity: v.severity,
-              explanation: v.explanation,
-              fcraStatute: v.fcraStatute,
-              evidence: v.evidence || null,
-              matchedRule: v.matchedRule || null,
-              category: v.category || "FCRA_REPORTING",
-              evidenceRequired: v.evidenceRequired || null,
-              evidenceProvided: v.evidenceProvided || false,
-              evidenceNotes: v.evidenceNotes || null,
-              confidence: v.confidence || "possible",
-              croReminder: v.croReminder || null,
-            });
-            totalViolations++;
-          }
-          await storage.updateWorkflowStep(negAccount.id, "scanned");
-        } catch (violationErr) {
-          console.error(`Violation scan failed for account ${negAccount.id}:`, violationErr);
-        }
-      }
+      const result = await runReportPipeline(
+        fileContent,
+        fileType,
+        req.file.originalname,
+        pdfBuffer,
+        imageBuffer,
+      );
 
       res.json({
-        scanId: scan.id,
+        scanId: result.scanId,
+        parsedReportId: result.parsedReportId,
         consumerName: result.consumerName,
-        accountsCreated: result.accounts.length,
-        violationsFound: totalViolations,
-        findingsDetected: result.findings.length,
+        accountsCreated: result.accountsCreated,
+        violationsFound: result.violationsFound,
+        issueFlagsDetected: result.issueFlagsDetected,
+        summary: {
+          tradelineCount: result.parsedReport.tradelines.length,
+          publicRecordCount: result.parsedReport.publicRecords.length,
+          inquiryCount: result.parsedReport.inquiries.length,
+          scores: result.parsedReport.profile.scores,
+          categorySummaries: result.parsedReport.summary.categorySummaries,
+          actionPlanItems: result.parsedReport.summary.actionPlan.length,
+        },
       });
     } catch (error: any) {
       console.error("Upload scan error:", error);
@@ -688,6 +614,224 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating report metadata:", error);
       res.status(500).json({ error: "Failed to update report metadata" });
+    }
+  });
+
+  // ========== PARSED REPORT ENDPOINTS ==========
+
+  // GET /api/scans/:id/parsed-report — Get the full parsed credit report JSON
+  app.get("/api/scans/:id/parsed-report", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+      res.json(parsedReport.reportJson);
+    } catch (error) {
+      console.error("Error fetching parsed report:", error);
+      res.status(500).json({ error: "Failed to fetch parsed report" });
+    }
+  });
+
+  // GET /api/scans/:id/issue-flags — Get deterministic issue flags
+  app.get("/api/scans/:id/issue-flags", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+      res.json(parsedReport.issueFlagsJson || []);
+    } catch (error) {
+      console.error("Error fetching issue flags:", error);
+      res.status(500).json({ error: "Failed to fetch issue flags" });
+    }
+  });
+
+  // GET /api/scans/:id/report-summary — Get hierarchical summaries
+  app.get("/api/scans/:id/report-summary", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+      res.json(parsedReport.summaryJson || {});
+    } catch (error) {
+      console.error("Error fetching report summary:", error);
+      res.status(500).json({ error: "Failed to fetch report summary" });
+    }
+  });
+
+  // GET /api/scans/:id/tradeline-evidence — Get per-tradeline evidence blocks
+  app.get("/api/scans/:id/tradeline-evidence", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+
+      const evidence = await storage.getTradelineEvidenceByScan(parsedReport.id);
+      res.json(evidence.map(e => ({
+        id: e.id,
+        creditorName: e.creditorName,
+        accountNumberMasked: e.accountNumberMasked,
+        tradeline: e.tradelineJson,
+        evidenceText: e.evidenceText,
+        bureaus: e.bureaus,
+        issueFlags: e.issueFlagsJson || [],
+      })));
+    } catch (error) {
+      console.error("Error fetching tradeline evidence:", error);
+      res.status(500).json({ error: "Failed to fetch tradeline evidence" });
+    }
+  });
+
+  // GET /api/scans/:id/profile — Get credit report profile (name, scores, addresses)
+  app.get("/api/scans/:id/profile", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+      res.json(parsedReport.profileJson || {});
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      res.status(500).json({ error: "Failed to fetch profile" });
+    }
+  });
+
+  // GET /api/scans/:id/action-plan — Get the dispute action plan
+  app.get("/api/scans/:id/action-plan", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+      const summary = parsedReport.summaryJson as any;
+      res.json({
+        actionPlan: summary?.actionPlan || [],
+        accountOneLiners: summary?.accountOneLiners || [],
+        categorySummaries: summary?.categorySummaries || [],
+      });
+    } catch (error) {
+      console.error("Error fetching action plan:", error);
+      res.status(500).json({ error: "Failed to fetch action plan" });
+    }
+  });
+
+  // ========== CRO REVIEW & EDIT ENDPOINTS ==========
+
+  // PATCH /api/scans/:id/issue-flags/:index/review — CRO review/edit a specific issue flag
+  app.patch("/api/scans/:id/issue-flags/:index/review", async (req, res) => {
+    try {
+      const scanId = parseInt(req.params.id);
+      const flagIndex = parseInt(req.params.index);
+      const parsedReport = await storage.getParsedReportByScan(scanId);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found" });
+
+      const flags = (parsedReport.issueFlagsJson as any[]) || [];
+      if (flagIndex < 0 || flagIndex >= flags.length) {
+        return res.status(400).json({ error: "Invalid flag index" });
+      }
+
+      const { reviewStatus, reviewerNotes, severityOverride, descriptionOverride } = req.body;
+
+      // Update the flag in-place
+      flags[flagIndex] = {
+        ...flags[flagIndex],
+        reviewStatus: reviewStatus || flags[flagIndex].reviewStatus || "pending",
+        reviewerNotes: reviewerNotes !== undefined ? reviewerNotes : flags[flagIndex].reviewerNotes,
+        severityOverride: severityOverride !== undefined ? severityOverride : flags[flagIndex].severityOverride,
+        descriptionOverride: descriptionOverride !== undefined ? descriptionOverride : flags[flagIndex].descriptionOverride,
+        reviewedAt: new Date().toISOString(),
+      };
+
+      await storage.updateParsedReportFlags(parsedReport.id, flags);
+      res.json(flags[flagIndex]);
+    } catch (error) {
+      console.error("Error reviewing issue flag:", error);
+      res.status(500).json({ error: "Failed to review issue flag" });
+    }
+  });
+
+  // PATCH /api/scans/:id/action-plan/edit — CRO edit the action plan
+  app.patch("/api/scans/:id/action-plan/edit", async (req, res) => {
+    try {
+      const scanId = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(scanId);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found" });
+
+      const { actionPlan, accountOneLiners, categorySummaries, croNotes } = req.body;
+      const summary = (parsedReport.summaryJson as any) || {};
+
+      // Allow CRO to override any part of the summary
+      if (actionPlan !== undefined) summary.actionPlan = actionPlan;
+      if (accountOneLiners !== undefined) summary.accountOneLiners = accountOneLiners;
+      if (categorySummaries !== undefined) summary.categorySummaries = categorySummaries;
+      if (croNotes !== undefined) summary.croNotes = croNotes;
+      summary.lastEditedAt = new Date().toISOString();
+
+      await storage.updateParsedReportSummary(parsedReport.id, summary);
+      res.json(summary);
+    } catch (error) {
+      console.error("Error editing action plan:", error);
+      res.status(500).json({ error: "Failed to edit action plan" });
+    }
+  });
+
+  // GET /api/scans/:id/cro-review — Combined review view for CRO
+  // Returns everything needed for CRO review: violations, issue flags, summary, evidence
+  app.get("/api/scans/:id/cro-review", async (req, res) => {
+    try {
+      const scanId = parseInt(req.params.id);
+      const scan = await storage.getScan(scanId);
+      if (!scan) return res.status(404).json({ error: "Scan not found" });
+
+      const parsedReport = await storage.getParsedReportByScan(scanId);
+      const negAccounts = await storage.getNegativeAccountsByScan(scanId);
+      const accountsWithViolations = await Promise.all(
+        negAccounts.map(async (acct) => {
+          const violations = await storage.getViolationsByAccount(acct.id);
+          return { ...acct, violations };
+        })
+      );
+
+      let tradelineEvidenceList: any[] = [];
+      if (parsedReport) {
+        const evidence = await storage.getTradelineEvidenceByScan(parsedReport.id);
+        tradelineEvidenceList = evidence.map(e => ({
+          id: e.id,
+          creditorName: e.creditorName,
+          accountNumberMasked: e.accountNumberMasked,
+          tradeline: e.tradelineJson,
+          issueFlags: e.issueFlagsJson || [],
+          bureaus: e.bureaus,
+        }));
+      }
+
+      const allViolations = accountsWithViolations.flatMap(a => a.violations);
+
+      res.json({
+        scan: {
+          id: scan.id,
+          consumerName: scan.consumerName,
+          clientName: scan.clientName,
+          clientState: scan.clientState,
+          status: scan.status,
+          reviewStatus: scan.reviewStatus,
+        },
+        profile: parsedReport?.profileJson || null,
+        scores: (parsedReport?.profileJson as any)?.scores || [],
+        issueFlags: parsedReport?.issueFlagsJson || [],
+        summary: parsedReport?.summaryJson || null,
+        accounts: accountsWithViolations,
+        tradelineEvidence: tradelineEvidenceList,
+        reviewProgress: {
+          totalViolations: allViolations.length,
+          reviewed: allViolations.filter(v => v.reviewStatus && v.reviewStatus !== "pending").length,
+          confirmed: allViolations.filter(v => v.reviewStatus === "confirmed").length,
+          modified: allViolations.filter(v => v.reviewStatus === "modified").length,
+          rejected: allViolations.filter(v => v.reviewStatus === "rejected").length,
+          needsInfo: allViolations.filter(v => v.reviewStatus === "needs_info").length,
+          pending: allViolations.filter(v => !v.reviewStatus || v.reviewStatus === "pending").length,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching CRO review:", error);
+      res.status(500).json({ error: "Failed to fetch CRO review data" });
     }
   });
 

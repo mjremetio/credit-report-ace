@@ -1,0 +1,608 @@
+/**
+ * Two-Pass LLM Extraction Pipeline
+ *
+ * Pass 1: "Extract structured fields" — per-section LLM call with strict JSON schema
+ * Pass 2: "Validate + dedupe" — ensure bureau blocks align, no missing key fields
+ *
+ * This replaces the monolithic analyze-everything-at-once approach.
+ */
+
+import OpenAI from "openai";
+import type {
+  ParsedCreditReport,
+  CreditReportProfile,
+  BureauSummary,
+  Tradeline,
+  TradeBureauDetail,
+  PublicRecord,
+  Inquiry,
+  Bureau,
+  AccountType,
+  AccountStatus,
+  ALL_BUREAUS,
+  LLMProfileExtraction,
+  LLMTradelineExtraction,
+  LLMPublicRecordExtraction,
+  LLMInquiryExtraction,
+  LLMBureauSummaryExtraction,
+} from "@shared/credit-report-types";
+import type { ReportSection } from "./report-parser";
+import { batchSections } from "./report-parser";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  timeout: 300_000,
+  maxRetries: 2,
+});
+
+// ── Pass 1: Extract structured fields ──────────────────────────────
+
+const EXTRACTION_SYSTEM_PROMPT = `You are a precise credit report data extractor. Your ONLY job is to extract structured data from credit report text into a strict JSON schema. Do NOT analyze, interpret, or flag violations — just extract.
+
+## RULES:
+- Extract EXACTLY what the report says — do not infer or fabricate data
+- For tri-merge reports, extract PER-BUREAU values separately (TransUnion, Experian, Equifax)
+- "--" means "not reported by this bureau" (use null)
+- Preserve masked account numbers exactly as shown
+- Dates should be in "YYYY-MM" or "YYYY-MM-DD" format
+- Dollar amounts should be numbers (no $ symbol, no commas)
+- Extract ALL remarks/comments verbatim — these are critical for dispute analysis
+- If a section contains multiple accounts, extract each one separately
+- Payment history grids should be extracted month-by-month with the status code
+
+Return ONLY valid JSON.`;
+
+const PROFILE_EXTRACTION_PROMPT = `Extract personal information from this credit report section.
+
+Return JSON:
+{
+  "name": "FULL NAME",
+  "aliases": ["any name variations"],
+  "dateOfBirth": "YYYY-MM-DD or null",
+  "ssn": "XXX-XX-1234 (masked) or null",
+  "reportDate": "YYYY-MM-DD",
+  "scores": [{ "bureau": "TransUnion|Experian|Equifax", "score": 557, "model": "VantageScore 3.0" }],
+  "addresses": [{ "address": "full address", "bureaus": ["TransUnion", "Experian"] }],
+  "employers": [{ "name": "employer name", "bureaus": ["TransUnion"] }]
+}`;
+
+const TRADELINE_EXTRACTION_PROMPT = `Extract ALL tradeline/account data from this credit report section.
+
+For EACH account, return per-bureau details separately. Return JSON:
+{
+  "tradelines": [
+    {
+      "creditorName": "CREDITOR NAME",
+      "accountNumberMasked": "431503*****",
+      "accountType": "revolving|installment|collection|mortgage|student_loan|auto_loan|other",
+      "status": "current|late|chargeoff|collection|closed|paid|settled|bankruptcy|repossession|derogatory|other",
+      "originalCreditor": "name if collection/transferred, else null",
+      "balance": 0,
+      "bureaus": ["TransUnion", "Experian", "Equifax"],
+      "bureauDetails": [
+        {
+          "bureau": "TransUnion",
+          "accountNumber": "431503**********",
+          "balance": 40,
+          "status": "Open",
+          "dateOpened": "2023-10",
+          "dateClosed": null,
+          "lastPaymentDate": "2025-11",
+          "lastReportedDate": "2025-12",
+          "highBalance": 488,
+          "creditLimit": 300,
+          "monthlyPayment": 25,
+          "paymentStatus": "Current",
+          "accountRating": "Open/Current",
+          "creditorType": "Bank Credit Cards",
+          "pastDueAmount": 0,
+          "terms": "Revolving",
+          "paymentHistory": [{ "month": "2025-12", "code": "C" }, { "month": "2025-11", "code": "C" }],
+          "remarks": ["Account in good standing"]
+        }
+      ],
+      "dates": {
+        "opened": "2023-10",
+        "closed": null,
+        "firstDelinquency": null,
+        "lastPayment": "2025-11",
+        "lastReported": "2025-12"
+      },
+      "remarks": ["all distinct remarks across ALL bureaus"]
+    }
+  ]
+}
+
+IMPORTANT:
+- Extract payment history grids as month/code pairs (C=Current, 30/60/90/120=Late days, CO=Charge-off, CL=Collection, BK=Bankruptcy)
+- Extract ALL remarks/comments — especially bankruptcy, dispute, and collection remarks
+- If the same account shows different values across bureaus, record each bureau's value separately`;
+
+const SUMMARY_EXTRACTION_PROMPT = `Extract the per-bureau account summary statistics from this credit report section.
+
+Return JSON:
+{
+  "bureauSummaries": [
+    {
+      "bureau": "TransUnion",
+      "totalAccounts": 25,
+      "openAccounts": 10,
+      "closedAccounts": 15,
+      "derogatoryCount": 3,
+      "collectionsCount": 2,
+      "publicRecordsCount": 1,
+      "inquiriesCount": 5,
+      "balanceTotal": 50000,
+      "creditLimitTotal": 100000,
+      "monthlyPaymentTotal": 1500
+    }
+  ]
+}`;
+
+const PUBLIC_RECORDS_EXTRACTION_PROMPT = `Extract ALL public records from this credit report section.
+
+Return JSON:
+{
+  "publicRecords": [
+    {
+      "type": "Bankruptcy Chapter 7",
+      "court": "Court name",
+      "caseNumber": "XX-XXXXX",
+      "dateFiled": "2020-01",
+      "dateDischarged": "2020-06",
+      "amount": 50000,
+      "bureaus": ["TransUnion", "Experian", "Equifax"],
+      "remarks": ["Discharged", "Chapter 7"]
+    }
+  ]
+}`;
+
+const INQUIRIES_EXTRACTION_PROMPT = `Extract ALL credit inquiries from this credit report section.
+
+Return JSON:
+{
+  "inquiries": [
+    {
+      "creditorName": "CREDITOR NAME",
+      "date": "2025-06-15",
+      "type": "hard|soft|unknown",
+      "bureau": "TransUnion|Experian|Equifax",
+      "permissiblePurpose": "reason if stated"
+    }
+  ]
+}`;
+
+const IMAGE_FULL_EXTRACTION_PROMPT = `This is a credit report image. Extract ALL structured data into JSON.
+
+Return JSON:
+{
+  "profile": { "name": "...", "reportDate": "...", "scores": [...], "addresses": [...], "employers": [...] },
+  "bureauSummaries": [...],
+  "tradelines": [...],
+  "publicRecords": [...],
+  "inquiries": [...]
+}
+
+Use the exact same field shapes as described: tradelines with bureauDetails arrays, per-bureau scores, etc.`;
+
+// ── LLM call helper ────────────────────────────────────────────────
+
+async function llmExtract<T>(systemPrompt: string, userPrompt: string, sectionText: string): Promise<T> {
+  const response = await openai.chat.completions.create({
+    model: "gpt-5.2",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `${userPrompt}\n\n--- BEGIN REPORT TEXT ---\n${sectionText}\n--- END REPORT TEXT ---` },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 16384,
+  });
+
+  const raw = response.choices[0]?.message?.content || "{}";
+  return JSON.parse(raw) as T;
+}
+
+async function llmExtractImage<T>(systemPrompt: string, userPrompt: string, imageBuffer: Buffer, mimeType: string): Promise<T> {
+  const base64 = imageBuffer.toString("base64");
+  const mediaType = mimeType.startsWith("image/") ? mimeType : "image/png";
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-5.2",
+    messages: [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userPrompt },
+          { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64}` } },
+        ],
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 16384,
+  });
+
+  const raw = response.choices[0]?.message?.content || "{}";
+  return JSON.parse(raw) as T;
+}
+
+// ── Pass 1: Section-by-section extraction ──────────────────────────
+
+interface RawExtraction {
+  profile?: LLMProfileExtraction;
+  bureauSummaries: LLMBureauSummaryExtraction[];
+  tradelines: Array<LLMTradelineExtraction & { evidenceText: string }>;
+  publicRecords: Array<LLMPublicRecordExtraction & { evidenceText: string }>;
+  inquiries: LLMInquiryExtraction[];
+}
+
+export async function extractPass1(sections: ReportSection[], imageBuffer?: Buffer, imageMimeType?: string): Promise<RawExtraction> {
+  // Handle image-based reports
+  if (sections.length === 1 && sections[0].text === "__IMAGE_INPUT__" && imageBuffer) {
+    const result = await llmExtractImage<any>(
+      EXTRACTION_SYSTEM_PROMPT,
+      IMAGE_FULL_EXTRACTION_PROMPT,
+      imageBuffer,
+      imageMimeType || "image/png",
+    );
+    return {
+      profile: result.profile || undefined,
+      bureauSummaries: Array.isArray(result.bureauSummaries) ? result.bureauSummaries : [],
+      tradelines: (Array.isArray(result.tradelines) ? result.tradelines : []).map((t: any) => ({
+        ...t,
+        evidenceText: JSON.stringify(t),
+      })),
+      publicRecords: (Array.isArray(result.publicRecords) ? result.publicRecords : []).map((r: any) => ({
+        ...r,
+        evidenceText: JSON.stringify(r),
+      })),
+      inquiries: Array.isArray(result.inquiries) ? result.inquiries : [],
+    };
+  }
+
+  const raw: RawExtraction = {
+    bureauSummaries: [],
+    tradelines: [],
+    publicRecords: [],
+    inquiries: [],
+  };
+
+  // Batch small sections together, process large ones individually
+  const batches = batchSections(sections);
+
+  for (const batch of batches) {
+    const batchText = batch.map(s => `[${s.type.toUpperCase()}: ${s.label}]\n${s.text}`).join("\n\n===\n\n");
+    const primaryType = batch[0].type;
+
+    try {
+      if (primaryType === "personal_info") {
+        const result = await llmExtract<{ name?: string; aliases?: string[]; dateOfBirth?: string; ssn?: string; reportDate?: string; scores?: any[]; addresses?: any[]; employers?: any[] }>(
+          EXTRACTION_SYSTEM_PROMPT,
+          PROFILE_EXTRACTION_PROMPT,
+          batchText,
+        );
+        if (result.name) {
+          raw.profile = { ...result, name: result.name } as LLMProfileExtraction;
+        }
+      } else if (primaryType === "bureau_summary") {
+        const result = await llmExtract<{ bureauSummaries?: LLMBureauSummaryExtraction[] }>(
+          EXTRACTION_SYSTEM_PROMPT,
+          SUMMARY_EXTRACTION_PROMPT,
+          batchText,
+        );
+        if (result.bureauSummaries) {
+          raw.bureauSummaries.push(...result.bureauSummaries);
+        }
+      } else if (primaryType === "public_records") {
+        const result = await llmExtract<{ publicRecords?: LLMPublicRecordExtraction[] }>(
+          EXTRACTION_SYSTEM_PROMPT,
+          PUBLIC_RECORDS_EXTRACTION_PROMPT,
+          batchText,
+        );
+        if (result.publicRecords) {
+          raw.publicRecords.push(...result.publicRecords.map(r => ({
+            ...r,
+            evidenceText: batchText,
+          })));
+        }
+      } else if (primaryType === "inquiries") {
+        const result = await llmExtract<{ inquiries?: LLMInquiryExtraction[] }>(
+          EXTRACTION_SYSTEM_PROMPT,
+          INQUIRIES_EXTRACTION_PROMPT,
+          batchText,
+        );
+        if (result.inquiries) {
+          raw.inquiries.push(...result.inquiries);
+        }
+      } else {
+        // Default: treat as tradeline extraction (most sections contain accounts)
+        const result = await llmExtract<{
+          tradelines?: LLMTradelineExtraction[];
+          // Also accept if profile/inquiries/public_records appear in mixed sections
+          profile?: LLMProfileExtraction;
+          publicRecords?: LLMPublicRecordExtraction[];
+          inquiries?: LLMInquiryExtraction[];
+          bureauSummaries?: LLMBureauSummaryExtraction[];
+        }>(
+          EXTRACTION_SYSTEM_PROMPT,
+          TRADELINE_EXTRACTION_PROMPT,
+          batchText,
+        );
+
+        if (result.tradelines) {
+          raw.tradelines.push(...result.tradelines.map(t => ({
+            ...t,
+            evidenceText: batchText,
+          })));
+        }
+        if (result.profile && !raw.profile) {
+          raw.profile = result.profile;
+        }
+        if (result.publicRecords) {
+          raw.publicRecords.push(...result.publicRecords.map(r => ({
+            ...r,
+            evidenceText: batchText,
+          })));
+        }
+        if (result.inquiries) {
+          raw.inquiries.push(...result.inquiries);
+        }
+        if (result.bureauSummaries) {
+          raw.bureauSummaries.push(...result.bureauSummaries);
+        }
+      }
+    } catch (err: any) {
+      console.error(`[extractor] Pass 1 failed for batch (${primaryType}):`, err?.message || err);
+      // Continue with other batches
+    }
+  }
+
+  return raw;
+}
+
+// ── Pass 2: Validate + Dedupe + Normalize ──────────────────────────
+
+function normalizeBureau(name: string): Bureau | null {
+  const n = name.toLowerCase().trim();
+  if (n.includes("transunion") || n === "tu") return "TransUnion";
+  if (n.includes("experian") || n === "ex") return "Experian";
+  if (n.includes("equifax") || n === "eq") return "Equifax";
+  return null;
+}
+
+function normalizeAccountType(raw: string | undefined): AccountType {
+  if (!raw) return "other";
+  const t = raw.toLowerCase();
+  if (t.includes("revolv")) return "revolving";
+  if (t.includes("install")) return "installment";
+  if (t.includes("collect")) return "collection";
+  if (t.includes("mortgage") || t.includes("home")) return "mortgage";
+  if (t.includes("student")) return "student_loan";
+  if (t.includes("auto")) return "auto_loan";
+  return "other";
+}
+
+function normalizeAccountStatus(raw: string | undefined): AccountStatus {
+  if (!raw) return "other";
+  const s = raw.toLowerCase();
+  if (s.includes("current") || s.includes("open") && !s.includes("charge")) return "current";
+  if (s.includes("late") || s.includes("past due") || s.includes("delinq")) return "late";
+  if (s.includes("charge") && s.includes("off") || s.includes("chargeoff")) return "chargeoff";
+  if (s.includes("collect")) return "collection";
+  if (s.includes("closed") || s.includes("transferred")) return "closed";
+  if (s.includes("paid")) return "paid";
+  if (s.includes("settled")) return "settled";
+  if (s.includes("bankrupt")) return "bankruptcy";
+  if (s.includes("reposs")) return "repossession";
+  if (s.includes("derog")) return "derogatory";
+  return "other";
+}
+
+function dedupeTradelineKey(t: LLMTradelineExtraction): string {
+  const name = (t.creditorName || "").toLowerCase().trim().replace(/\s+/g, " ");
+  const acctNum = (t.accountNumberMasked || "").replace(/[^0-9*]/g, "");
+  return `${name}|${acctNum}`;
+}
+
+export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
+  // ── Profile ──
+  const profile: CreditReportProfile = {
+    name: raw.profile?.name || "Unknown Consumer",
+    aliases: raw.profile?.aliases || [],
+    dateOfBirth: raw.profile?.dateOfBirth || undefined,
+    ssn: raw.profile?.ssn || undefined,
+    reportDate: raw.profile?.reportDate || new Date().toISOString().split("T")[0],
+    scores: (raw.profile?.scores || []).map(s => ({
+      bureau: normalizeBureau(s.bureau) || "TransUnion" as Bureau,
+      score: typeof s.score === "number" ? s.score : null,
+      model: s.model,
+    })),
+    addresses: (raw.profile?.addresses || []).map(a => ({
+      address: a.address,
+      bureaus: (a.bureaus || []).map(b => normalizeBureau(b)).filter((b): b is Bureau => b !== null),
+    })),
+    employers: (raw.profile?.employers || []).map(e => ({
+      name: e.name,
+      bureaus: (e.bureaus || []).map(b => normalizeBureau(b)).filter((b): b is Bureau => b !== null),
+    })),
+  };
+
+  // ── Bureau Summaries ──
+  const summaryMap = new Map<Bureau, BureauSummary>();
+  for (const s of raw.bureauSummaries) {
+    const bureau = normalizeBureau(s.bureau);
+    if (!bureau) continue;
+    summaryMap.set(bureau, {
+      bureau,
+      totalAccounts: s.totalAccounts || 0,
+      openAccounts: s.openAccounts || 0,
+      closedAccounts: s.closedAccounts || 0,
+      derogatoryCount: s.derogatoryCount || 0,
+      collectionsCount: s.collectionsCount || 0,
+      publicRecordsCount: s.publicRecordsCount || 0,
+      inquiriesCount: s.inquiriesCount || 0,
+      balanceTotal: s.balanceTotal,
+      creditLimitTotal: s.creditLimitTotal,
+      monthlyPaymentTotal: s.monthlyPaymentTotal,
+    });
+  }
+
+  // ── Tradelines (deduplicate) ──
+  const tradelineMap = new Map<string, LLMTradelineExtraction & { evidenceText: string }>();
+  for (const t of raw.tradelines) {
+    const key = dedupeTradelineKey(t);
+    if (!tradelineMap.has(key)) {
+      tradelineMap.set(key, t);
+    } else {
+      // Merge bureau details from duplicate
+      const existing = tradelineMap.get(key)!;
+      if (t.bureauDetails) {
+        existing.bureauDetails = [...(existing.bureauDetails || []), ...t.bureauDetails];
+      }
+      if (t.remarks) {
+        existing.remarks = Array.from(new Set([...(existing.remarks || []), ...t.remarks]));
+      }
+    }
+  }
+
+  const tradelines: Tradeline[] = Array.from(tradelineMap.values()).map(t => {
+    const bureauDetails: TradeBureauDetail[] = (t.bureauDetails || []).reduce<TradeBureauDetail[]>((acc, bd) => {
+      const bureau = normalizeBureau(bd.bureau);
+      if (!bureau) return acc;
+      acc.push({
+        bureau,
+        accountNumber: bd.accountNumber,
+        balance: typeof bd.balance === "number" ? bd.balance : null,
+        status: bd.status,
+        dateOpened: bd.dateOpened,
+        dateClosed: bd.dateClosed,
+        lastPaymentDate: bd.lastPaymentDate,
+        lastReportedDate: bd.lastReportedDate,
+        highBalance: typeof bd.highBalance === "number" ? bd.highBalance : null,
+        creditLimit: typeof bd.creditLimit === "number" ? bd.creditLimit : null,
+        monthlyPayment: typeof bd.monthlyPayment === "number" ? bd.monthlyPayment : null,
+        paymentStatus: bd.paymentStatus,
+        accountRating: bd.accountRating,
+        creditorType: bd.creditorType,
+        pastDueAmount: typeof bd.pastDueAmount === "number" ? bd.pastDueAmount : null,
+        terms: bd.terms,
+        paymentHistory: (bd.paymentHistory || []).map(ph => ({
+          month: ph.month,
+          code: ph.code,
+        })),
+        remarks: bd.remarks || [],
+      });
+      return acc;
+    }, []);
+
+    // Dedupe bureau details by bureau name
+    const seenBureaus = new Set<string>();
+    const uniqueBureauDetails = bureauDetails.filter(bd => {
+      if (seenBureaus.has(bd.bureau)) return false;
+      seenBureaus.add(bd.bureau);
+      return true;
+    });
+
+    const bureaus: Bureau[] = (t.bureaus || [])
+      .map(b => normalizeBureau(b))
+      .filter((b): b is Bureau => b !== null);
+    // Also add bureaus from details
+    for (const bd of uniqueBureauDetails) {
+      if (!bureaus.includes(bd.bureau)) bureaus.push(bd.bureau);
+    }
+
+    // Collect all remarks
+    const allRemarks = new Set<string>(t.remarks || []);
+    for (const bd of uniqueBureauDetails) {
+      for (const r of bd.remarks || []) {
+        allRemarks.add(r);
+      }
+    }
+
+    return {
+      creditorName: t.creditorName || "Unknown",
+      accountNumberMasked: t.accountNumberMasked,
+      accountType: normalizeAccountType(t.accountType),
+      aggregateStatus: normalizeAccountStatus(t.status),
+      originalCreditor: t.originalCreditor || undefined,
+      balance: typeof t.balance === "number" ? t.balance : null,
+      bureaus,
+      bureauDetails: uniqueBureauDetails,
+      dates: {
+        opened: t.dates?.opened,
+        closed: t.dates?.closed,
+        firstDelinquency: t.dates?.firstDelinquency,
+        lastPayment: t.dates?.lastPayment,
+        lastReported: t.dates?.lastReported,
+      },
+      remarks: Array.from(allRemarks),
+      evidenceText: t.evidenceText,
+    };
+  });
+
+  // ── Public Records ──
+  const publicRecords: PublicRecord[] = raw.publicRecords.map(r => ({
+    type: r.type || "Unknown",
+    court: r.court,
+    caseNumber: r.caseNumber,
+    dateFiled: r.dateFiled,
+    dateDischarged: r.dateDischarged,
+    amount: typeof r.amount === "number" ? r.amount : null,
+    bureaus: (r.bureaus || []).map(b => normalizeBureau(b)).filter((b): b is Bureau => b !== null),
+    remarks: r.remarks || [],
+    evidenceText: r.evidenceText,
+  }));
+
+  // ── Inquiries (deduplicate) ──
+  const inquirySet = new Set<string>();
+  const inquiries: Inquiry[] = raw.inquiries.reduce<Inquiry[]>((acc, i) => {
+    const bureau = normalizeBureau(i.bureau);
+    if (!bureau) return acc;
+    const key = `${i.creditorName?.toLowerCase()}|${i.date}|${bureau}`;
+    if (inquirySet.has(key)) return acc;
+    inquirySet.add(key);
+    acc.push({
+      creditorName: i.creditorName || "Unknown",
+      date: i.date,
+      type: (i.type === "hard" || i.type === "soft") ? i.type : "unknown" as const,
+      bureau,
+      permissiblePurpose: i.permissiblePurpose,
+    });
+    return acc;
+  }, []);
+
+  return {
+    profile,
+    bureauSummaries: Array.from(summaryMap.values()),
+    tradelines,
+    publicRecords,
+    inquiries,
+    issueFlags: [], // filled by rule engine
+    summary: { accountOneLiners: [], categorySummaries: [], actionPlan: [] }, // filled by summary generator
+    metadata: {
+      parsedAt: new Date().toISOString(),
+      parserVersion: "2.0.0",
+    },
+  };
+}
+
+// ── Full extraction pipeline ───────────────────────────────────────
+
+export async function extractCreditReport(
+  sections: ReportSection[],
+  imageBuffer?: Buffer,
+  imageMimeType?: string,
+): Promise<ParsedCreditReport> {
+  console.log(`[extractor] Pass 1: Extracting structured fields from ${sections.length} section(s)`);
+  const raw = await extractPass1(sections, imageBuffer, imageMimeType);
+
+  console.log(`[extractor] Pass 1 results: profile=${!!raw.profile}, tradelines=${raw.tradelines.length}, publicRecords=${raw.publicRecords.length}, inquiries=${raw.inquiries.length}`);
+
+  console.log(`[extractor] Pass 2: Validating + normalizing + deduplicating`);
+  const report = validateAndNormalize(raw);
+
+  console.log(`[extractor] Final: ${report.tradelines.length} tradelines, ${report.publicRecords.length} public records, ${report.inquiries.length} inquiries`);
+
+  return report;
+}

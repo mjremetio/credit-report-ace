@@ -1,0 +1,398 @@
+/**
+ * Section-Based Credit Report Parser
+ *
+ * Splits raw credit report text into natural chunks:
+ *  - Personal Information
+ *  - Per-bureau Summaries
+ *  - Individual Creditor Blocks (one per account across all bureaus)
+ *  - Public Records
+ *  - Inquiries
+ *
+ * This is Step 2 of the pipeline: chunk by "Account Blocks", not by pages.
+ */
+
+import * as cheerio from "cheerio";
+import { PDFParse } from "pdf-parse";
+
+// ── Section types ──────────────────────────────────────────────────
+export type SectionType =
+  | "personal_info"
+  | "bureau_summary"
+  | "tradeline"
+  | "public_records"
+  | "inquiries"
+  | "unknown";
+
+export interface ReportSection {
+  type: SectionType;
+  label: string;          // human-readable label e.g. "MERRICK BK", "Personal Information"
+  text: string;           // raw text of this section
+  startIndex: number;     // character offset in original text
+}
+
+// ── Section header patterns ────────────────────────────────────────
+const SECTION_PATTERNS: Array<{ type: SectionType; pattern: RegExp; label?: string }> = [
+  // Personal information block
+  { type: "personal_info", pattern: /(?:^|\n)\s*(?:PERSONAL\s+INFORMATION|Personal\s+Information|CONSUMER\s+INFORMATION|Consumer\s+Information|IDENTIFICATION)/i, label: "Personal Information" },
+
+  // Bureau summary / account summary
+  { type: "bureau_summary", pattern: /(?:^|\n)\s*(?:ACCOUNT\s+SUMMARY|Account\s+Summary|CREDIT\s+SUMMARY|Credit\s+Summary|SUMMARY\s+OF\s+ACCOUNTS)/i, label: "Bureau Summary" },
+
+  // Public records
+  { type: "public_records", pattern: /(?:^|\n)\s*(?:PUBLIC\s+RECORDS?|Public\s+Records?)/i, label: "Public Records" },
+
+  // Inquiries
+  { type: "inquiries", pattern: /(?:^|\n)\s*(?:INQUIRIES|Inquiries|HARD\s+INQUIRIES|SOFT\s+INQUIRIES|REGULAR\s+INQUIRIES|PROMOTIONAL\s+INQUIRIES)/i, label: "Inquiries" },
+];
+
+// Patterns that typically start an individual account/tradeline block
+const ACCOUNT_BLOCK_PATTERNS: RegExp[] = [
+  // "CREDITOR NAME" followed by bureau columns or account data
+  // SmartCredit format: creditor name as a heading followed by account details
+  /(?:^|\n)\s*(?:Account\s+(?:Name|#)|Creditor\s+(?:Name|:))\s*/i,
+  // Tri-merge format: creditor name row with bureau columns
+  /(?:^|\n)\s*[A-Z][A-Z\s&'.\/\-]{3,40}\s*\|/,
+  // Common credit report formats: standalone creditor headers
+  /(?:^|\n)\s*(?:ACCOUNT|Account)\s+\d+\s*(?:of|\/)\s*\d+/i,
+];
+
+// Common creditor name patterns to detect tradeline blocks
+const CREDITOR_INDICATORS = [
+  /\b(?:BK|BANK|FINANCIAL|CREDIT|LENDING|MORTGAGE|FUNDING|CAPITAL|SERVICES|COLLECTION|AUTO|LOAN)\b/i,
+  /\b(?:DEPT\s+OF\s+ED|STUDENT|NAVIENT|NELNET|FED\s+LOAN)\b/i,
+  /\b(?:AMEX|CHASE|DISCOVER|CITI|WELLS\s+FARGO|BOA|SYNCHRONY|BARCLAYS)\b/i,
+  /\b(?:PORTFOLIO|MIDLAND|LVNV|CAVALRY|ENCORE|JEFFERSON)\b/i,
+];
+
+// ── Text extraction ────────────────────────────────────────────────
+export function extractTextFromHtml(html: string): string {
+  const $ = cheerio.load(html);
+  $("script, style, noscript").remove();
+
+  const lines: string[] = [];
+
+  // Extract tables with preserved column structure (critical for tri-merge reports)
+  $("table").each((_i, table) => {
+    const rows: string[][] = [];
+    $(table).find("tr").each((_j, tr) => {
+      const cells: string[] = [];
+      $(tr).find("th, td").each((_k, cell) => {
+        const text = $(cell).text().replace(/\s+/g, " ").trim();
+        cells.push(text);
+      });
+      if (cells.length > 0) rows.push(cells);
+    });
+    if (rows.length === 0) return;
+
+    for (const row of rows) {
+      lines.push(row.join(" | "));
+    }
+    lines.push(""); // separator between tables
+  });
+
+  // Also extract non-table text
+  $("table").remove();
+  $("h1, h2, h3, h4, h5, h6, p, li, div, span, section").each((_i, el) => {
+    const directText = $(el).contents()
+      .filter(function () { return this.type === "text"; })
+      .text().replace(/\s+/g, " ").trim();
+    if (directText.length > 2) {
+      lines.push(directText);
+    }
+  });
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  const parser = new PDFParse({ data: buffer });
+  const result = await parser.getText();
+  await parser.destroy();
+  const text = result.pages.map((p: any) => p.text).join("\n\n--- PAGE BREAK ---\n\n");
+  return text.replace(/[ \t]+/g, " ").trim();
+}
+
+export function cleanRawText(content: string): string {
+  return content.replace(/\s+/g, " ").trim();
+}
+
+// ── Section splitting ──────────────────────────────────────────────
+
+/**
+ * Split extracted text into natural report sections.
+ * Returns sections in document order.
+ */
+export function splitIntoSections(fullText: string): ReportSection[] {
+  const sections: ReportSection[] = [];
+
+  // Find all known section headers with their positions
+  const headerMatches: Array<{ type: SectionType; label: string; index: number }> = [];
+
+  for (const sp of SECTION_PATTERNS) {
+    let match: RegExpExecArray | null;
+    const regex = new RegExp(sp.pattern.source, sp.pattern.flags + (sp.pattern.flags.includes("g") ? "" : "g"));
+    while ((match = regex.exec(fullText)) !== null) {
+      headerMatches.push({
+        type: sp.type,
+        label: sp.label || match[0].trim(),
+        index: match.index,
+      });
+    }
+  }
+
+  // Sort by position
+  headerMatches.sort((a, b) => a.index - b.index);
+
+  // If no sections detected, try to detect tradeline blocks within the text
+  if (headerMatches.length === 0) {
+    // Fall back: treat the whole text as one chunk and let the LLM sort it out
+    return [{
+      type: "unknown",
+      label: "Full Report",
+      text: fullText,
+      startIndex: 0,
+    }];
+  }
+
+  // Extract text between headers
+  for (let i = 0; i < headerMatches.length; i++) {
+    const start = headerMatches[i].index;
+    const end = i < headerMatches.length - 1 ? headerMatches[i + 1].index : fullText.length;
+    const sectionText = fullText.slice(start, end).trim();
+
+    if (headerMatches[i].type === "tradeline" || headerMatches[i].type === "unknown") {
+      // For tradeline sections, further split into individual account blocks
+      const accountBlocks = splitTradelineSection(sectionText, start);
+      sections.push(...accountBlocks);
+    } else {
+      sections.push({
+        type: headerMatches[i].type,
+        label: headerMatches[i].label,
+        text: sectionText,
+        startIndex: start,
+      });
+    }
+  }
+
+  // Handle text before the first recognized section
+  if (headerMatches.length > 0 && headerMatches[0].index > 100) {
+    const preText = fullText.slice(0, headerMatches[0].index).trim();
+    if (preText.length > 50) {
+      sections.unshift({
+        type: "unknown",
+        label: "Report Header",
+        text: preText,
+        startIndex: 0,
+      });
+    }
+  }
+
+  // If we only found structural sections but no individual tradelines,
+  // look for creditor blocks within the "unknown" or large sections
+  const hasTradelineSections = sections.some(s => s.type === "tradeline");
+  if (!hasTradelineSections) {
+    const expandedSections: ReportSection[] = [];
+    for (const section of sections) {
+      if ((section.type === "unknown" || section.text.length > 2000) &&
+        section.type !== "personal_info" &&
+        section.type !== "inquiries" &&
+        section.type !== "public_records" &&
+        section.type !== "bureau_summary") {
+        const blocks = splitTradelineSection(section.text, section.startIndex);
+        if (blocks.some(b => b.type === "tradeline")) {
+          expandedSections.push(...blocks);
+        } else {
+          expandedSections.push(section);
+        }
+      } else {
+        expandedSections.push(section);
+      }
+    }
+    return expandedSections;
+  }
+
+  return sections;
+}
+
+/**
+ * Split a tradeline section into individual creditor blocks.
+ * Each block = one creditor across all bureaus.
+ */
+function splitTradelineSection(text: string, baseOffset: number): ReportSection[] {
+  const blocks: ReportSection[] = [];
+  const lines = text.split("\n");
+
+  let currentBlock: string[] = [];
+  let currentLabel = "";
+  let blockStart = 0;
+  let charOffset = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isCreditorHeader = isLikelyCreditorName(line, lines[i + 1] || "");
+
+    if (isCreditorHeader && currentBlock.length > 3) {
+      // Save the previous block
+      blocks.push({
+        type: "tradeline",
+        label: currentLabel || "Unknown Account",
+        text: currentBlock.join("\n").trim(),
+        startIndex: baseOffset + blockStart,
+      });
+      currentBlock = [line];
+      currentLabel = extractCreditorName(line);
+      blockStart = charOffset;
+    } else {
+      if (currentBlock.length === 0 && isCreditorHeader) {
+        currentLabel = extractCreditorName(line);
+        blockStart = charOffset;
+      }
+      currentBlock.push(line);
+    }
+    charOffset += line.length + 1;
+  }
+
+  // Save the last block
+  if (currentBlock.length > 3) {
+    const blockText = currentBlock.join("\n").trim();
+    if (blockText.length > 50) {
+      blocks.push({
+        type: currentLabel ? "tradeline" : "unknown",
+        label: currentLabel || "Unknown Section",
+        text: blockText,
+        startIndex: baseOffset + blockStart,
+      });
+    }
+  }
+
+  // If we couldn't split into meaningful blocks, return as single block
+  if (blocks.length === 0 && text.length > 50) {
+    return [{
+      type: "unknown",
+      label: "Accounts Section",
+      text,
+      startIndex: baseOffset,
+    }];
+  }
+
+  return blocks;
+}
+
+/**
+ * Heuristic: is this line likely a creditor name header?
+ */
+function isLikelyCreditorName(line: string, nextLine: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length < 3 || trimmed.length > 80) return false;
+
+  // Skip obvious non-creditor lines
+  if (/^\d+$/.test(trimmed)) return false;
+  if (/^[-=_|]+$/.test(trimmed)) return false;
+  if (/^(page|PAGE)\s+\d/i.test(trimmed)) return false;
+
+  // Check for common creditor patterns
+  const hasCreditorIndicator = CREDITOR_INDICATORS.some(p => p.test(trimmed));
+
+  // Lines that are mostly uppercase and not too long tend to be creditor headers
+  const upperRatio = (trimmed.match(/[A-Z]/g) || []).length / trimmed.length;
+  const isUpperCase = upperRatio > 0.6 && trimmed.length > 5 && trimmed.length < 50;
+
+  // Pipe-separated line with a name-like first segment (tri-merge format)
+  const pipeSegments = trimmed.split("|").map(s => s.trim());
+  const isPipeHeader = pipeSegments.length >= 2 && pipeSegments[0].length > 3 && /[A-Z]/.test(pipeSegments[0]);
+
+  // Next line contains account-type data
+  const nextHasAccountData = /(?:account|balance|status|opened|payment|type|bureau|credit)/i.test(nextLine);
+
+  if (hasCreditorIndicator && (isUpperCase || isPipeHeader || nextHasAccountData)) return true;
+  if (isUpperCase && nextHasAccountData) return true;
+  if (isPipeHeader && hasCreditorIndicator) return true;
+
+  return false;
+}
+
+function extractCreditorName(line: string): string {
+  // If pipe-separated, take the first segment
+  if (line.includes("|")) {
+    return line.split("|")[0].trim();
+  }
+  // Otherwise clean up and return
+  return line.trim().replace(/\s+/g, " ").slice(0, 60);
+}
+
+// ── Full extraction pipeline entry point ───────────────────────────
+
+export interface ExtractedReport {
+  fullText: string;
+  sections: ReportSection[];
+}
+
+export async function parseReportFile(
+  content: string,
+  fileType: string,
+  pdfBuffer?: Buffer,
+  imageBuffer?: Buffer,
+): Promise<ExtractedReport> {
+  let extractedText: string;
+
+  if (fileType.startsWith("image/") && imageBuffer) {
+    // Images can't be text-parsed; return a marker so the pipeline uses vision
+    return {
+      fullText: "",
+      sections: [{
+        type: "unknown",
+        label: "Image Report",
+        text: "__IMAGE_INPUT__",
+        startIndex: 0,
+      }],
+    };
+  }
+
+  if (fileType === "application/pdf" && pdfBuffer) {
+    extractedText = await extractTextFromPdf(pdfBuffer);
+  } else if (fileType === "text/html" || fileType === "html") {
+    extractedText = extractTextFromHtml(content);
+  } else {
+    extractedText = cleanRawText(content);
+  }
+
+  if (extractedText.length < 50) {
+    throw new Error("Could not extract sufficient text from the uploaded file.");
+  }
+
+  const sections = splitIntoSections(extractedText);
+
+  return {
+    fullText: extractedText,
+    sections,
+  };
+}
+
+/**
+ * Group sections into batches for LLM extraction.
+ * Small sections get grouped together; large tradeline blocks stay solo.
+ */
+export function batchSections(
+  sections: ReportSection[],
+  maxCharsPerBatch: number = 30_000,
+): ReportSection[][] {
+  const batches: ReportSection[][] = [];
+  let currentBatch: ReportSection[] = [];
+  let currentSize = 0;
+
+  for (const section of sections) {
+    if (currentSize + section.text.length > maxCharsPerBatch && currentBatch.length > 0) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentSize = 0;
+    }
+    currentBatch.push(section);
+    currentSize += section.text.length;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
