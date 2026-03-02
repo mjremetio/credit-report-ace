@@ -185,15 +185,21 @@ export async function analyzeReport(content: string, fileType: string, pdfBuffer
     throw new Error("Could not extract sufficient text from the uploaded file. The file may be image-based or corrupted.");
   }
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-5.2",
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: `Analyze this credit report and extract all accounts and FCRA violations:\n\n${extractedText}` }
-    ],
-    response_format: { type: "json_object" },
-    max_completion_tokens: 8192,
-  });
+  let response;
+  try {
+    response = await openai.chat.completions.create({
+      model: "gpt-5.2",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `Analyze this credit report and extract all accounts and FCRA violations:\n\n${extractedText}` }
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 8192,
+    });
+  } catch (err: any) {
+    console.error("AI service error during report analysis:", err?.message || err);
+    throw new Error("AI analysis service is temporarily unavailable. Please try again in a moment.");
+  }
 
   const raw = response.choices[0]?.message?.content || "{}";
 
