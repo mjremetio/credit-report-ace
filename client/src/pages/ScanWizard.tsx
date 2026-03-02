@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
-  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye
+  Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
+  MapPin
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
@@ -24,6 +25,12 @@ const ACCOUNT_TYPES = [
   { value: "repossession", label: "Repossession", desc: "Collateral was repossessed" },
 ];
 
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY",
+  "LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND",
+  "OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"
+];
+
 export default function ScanWizard() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -38,7 +45,7 @@ export default function ScanWizard() {
   });
 
   const updateScanMutation = useMutation({
-    mutationFn: (data: { currentStep?: number; status?: string }) => updateScan(scanId, data),
+    mutationFn: (data: { currentStep?: number; status?: string; clientName?: string | null; clientState?: string | null }) => updateScan(scanId, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scan", scanId] }),
   });
 
@@ -77,6 +84,13 @@ export default function ScanWizard() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="font-display font-medium text-lg text-white">{scan.consumerName}</h2>
+          {scan.clientState && (
+            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
+              scan.clientState === "CA" ? "border-yellow-500/30 text-yellow-400 bg-yellow-500/10" : "border-border text-muted-foreground bg-secondary"
+            }`}>
+              <MapPin className="w-3 h-3 inline mr-1" />{scan.clientState}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {STEPS.map((s, i) => (
@@ -105,7 +119,7 @@ export default function ScanWizard() {
 
       <div className="max-w-5xl mx-auto px-6 py-8">
         <AnimatePresence mode="wait">
-          {step === 1 && <Step1Welcome key="s1" scan={scan} goToStep={goToStep} />}
+          {step === 1 && <Step1Welcome key="s1" scan={scan} scanId={scanId} goToStep={goToStep} />}
           {step === 2 && <Step2AddAccounts key="s2" scan={scan} scanId={scanId} goToStep={goToStep} />}
           {step === 3 && <Step3Classify key="s3" scan={scan} scanId={scanId} goToStep={goToStep} />}
           {step === 4 && <Step4NextSteps key="s4" scan={scan} scanId={scanId} goToStep={goToStep} navigate={navigate} />}
@@ -115,7 +129,28 @@ export default function ScanWizard() {
   );
 }
 
-function Step1Welcome({ scan, goToStep }: { scan: any; goToStep: (s: number) => void }) {
+function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; goToStep: (s: number) => void }) {
+  const queryClient = useQueryClient();
+  const [clientName, setClientName] = useState(scan.clientName || "");
+  const [clientState, setClientState] = useState(scan.clientState || "");
+
+  const updateMutation = useMutation({
+    mutationFn: (data: any) => updateScan(scanId, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scan", scanId] }),
+  });
+
+  const handleProceed = () => {
+    if (clientName || clientState) {
+      updateMutation.mutate({
+        currentStep: 2,
+        clientName: clientName || null,
+        clientState: clientState || null,
+      });
+    } else {
+      goToStep(2);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="max-w-2xl mx-auto">
       <div className="text-center mb-10">
@@ -126,6 +161,40 @@ function Step1Welcome({ scan, goToStep }: { scan: any; goToStep: (s: number) => 
         <p className="text-muted-foreground font-mono text-sm max-w-lg mx-auto">
           This guided workflow will help you organize your negative credit accounts and identify potential FCRA violations.
         </p>
+      </div>
+
+      {/* Client info fields */}
+      <div className="bg-card border border-primary/20 rounded-xl p-6 mb-8">
+        <h3 className="font-display text-white mb-4">Client Information</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-mono text-muted-foreground mb-1 block">Client Name</label>
+            <input
+              type="text"
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              placeholder="Full client name..."
+              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-mono text-muted-foreground mb-1 block">
+              Client State {clientState === "CA" && <span className="text-yellow-400">(CA-specific rules apply)</span>}
+            </label>
+            <select
+              value={clientState}
+              onChange={(e) => setClientState(e.target.value)}
+              className={`w-full bg-background border rounded-lg px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-primary appearance-none ${
+                clientState === "CA" ? "border-yellow-500/50" : "border-border"
+              }`}
+            >
+              <option value="">Select state...</option>
+              {US_STATES.map((st) => (
+                <option key={st} value={st}>{st}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="space-y-4 mb-10">
@@ -150,7 +219,7 @@ function Step1Welcome({ scan, goToStep }: { scan: any; goToStep: (s: number) => 
       <div className="flex justify-center">
         <button
           data-testid="button-start-step2"
-          onClick={() => goToStep(2)}
+          onClick={handleProceed}
           className="px-8 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2 text-lg"
         >
           Begin <ArrowRight className="w-5 h-5" />
@@ -508,6 +577,15 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
   const unscannedCount = negAccounts.filter((a: any) => a.workflowStep !== "scanned").length;
   const totalViolationCount = negAccounts.reduce((sum: number, a: any) => sum + (a.violations?.length || 0), 0);
+  const allScanned = unscannedCount === 0 && negAccounts.length > 0;
+
+  // Group violations by category
+  const fcraViolations = negAccounts.flatMap((a: any) =>
+    (a.violations || []).filter((v: any) => !v.category || v.category === "FCRA_REPORTING")
+  );
+  const debtCollectorViolations = negAccounts.flatMap((a: any) =>
+    (a.violations || []).filter((v: any) => v.category && v.category !== "FCRA_REPORTING")
+  );
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
@@ -515,7 +593,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         <div>
           <h2 className="font-display text-2xl text-white mb-2">Next Steps</h2>
           <p className="text-muted-foreground font-mono text-sm">
-            Scan each account for potential FCRA violations and review the results.
+            Scan each account for potential FCRA & FDCPA violations and review the results.
           </p>
         </div>
         {unscannedCount > 0 && (
@@ -546,9 +624,17 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               {totalViolationCount} violation{totalViolationCount !== 1 ? "s" : ""} detected across {negAccounts.filter((a: any) => a.violations?.length > 0).length} account{negAccounts.filter((a: any) => a.violations?.length > 0).length !== 1 ? "s" : ""}
             </span>
           </div>
-          <span className="text-xs font-mono text-muted-foreground">
-            {unscannedCount === 0 ? "All accounts scanned" : `${unscannedCount} remaining`}
-          </span>
+          <div className="flex items-center gap-4 text-xs font-mono">
+            {fcraViolations.length > 0 && (
+              <span className="text-blue-400">FCRA: {fcraViolations.length}</span>
+            )}
+            {debtCollectorViolations.length > 0 && (
+              <span className="text-purple-400">FDCPA: {debtCollectorViolations.length}</span>
+            )}
+            <span className="text-muted-foreground">
+              {unscannedCount === 0 ? "All accounts scanned" : `${unscannedCount} remaining`}
+            </span>
+          </div>
         </div>
       )}
 
@@ -557,6 +643,10 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           const hasViolations = acct.violations && acct.violations.length > 0;
           const isScanning = scanningIds.has(acct.id);
           const isScanned = acct.workflowStep === "scanned";
+
+          // Split violations by category
+          const acctFcra = (acct.violations || []).filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
+          const acctFdcpa = (acct.violations || []).filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
 
           return (
             <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
@@ -599,35 +689,39 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                 {isScanning && (
                   <div className="flex items-center gap-3 py-4 justify-center">
                     <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                    <span className="text-sm font-mono text-primary">AI analyzing for FCRA violations...</span>
+                    <span className="text-sm font-mono text-primary">AI analyzing for FCRA & FDCPA violations...</span>
                   </div>
                 )}
 
                 {!isScanning && hasViolations && (
-                  <div>
-                    <h4 className="text-xs font-mono text-primary mb-3 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> DETECTED VIOLATIONS ({acct.violations.length})
-                    </h4>
-                    <div className="space-y-2">
-                      {acct.violations.map((v: any) => (
-                        <div key={v.id} data-testid={`violation-${v.id}`} className="bg-background border border-border rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <SeverityBadge severity={v.severity} />
-                            <span className="text-sm text-white font-medium">{v.violationType}</span>
-                          </div>
-                          <p className="text-xs font-mono text-muted-foreground leading-relaxed">{v.explanation}</p>
-                          {v.evidence && (
-                            <p className="text-xs font-mono text-muted-foreground/70 mt-1.5 italic">Evidence: {v.evidence}</p>
-                          )}
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="text-xs font-mono text-primary">{v.fcraStatute}</span>
-                            {v.matchedRule && (
-                              <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{v.matchedRule}</span>
-                            )}
-                          </div>
+                  <div className="space-y-4">
+                    {/* FCRA Violations */}
+                    {acctFcra.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-mono text-blue-400 mb-3 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> FCRA REPORTING VIOLATIONS ({acctFcra.length})
+                        </h4>
+                        <div className="space-y-2">
+                          {acctFcra.map((v: any) => (
+                            <ViolationCard key={v.id} violation={v} />
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
+
+                    {/* FDCPA Violations */}
+                    {acctFdcpa.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-mono text-purple-400 mb-3 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> DEBT COLLECTOR CONDUCT VIOLATIONS ({acctFdcpa.length})
+                        </h4>
+                        <div className="space-y-2">
+                          {acctFdcpa.map((v: any) => (
+                            <ViolationCard key={v.id} violation={v} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -640,7 +734,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
                 {!isScanning && !hasViolations && !isScanned && (
                   <div className="text-center py-4 text-xs font-mono text-muted-foreground">
-                    Click "Scan" to analyze this account for FCRA violations
+                    Click "Scan" to analyze this account for FCRA & FDCPA violations
                   </div>
                 )}
               </div>
@@ -665,16 +759,63 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           >
             <CheckCircle2 className="w-4 h-4" /> Mark Complete
           </button>
+          {allScanned && (
+            <button
+              data-testid="button-begin-review"
+              onClick={() => navigate(`/review/${scanId}`)}
+              className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+            >
+              <Eye className="w-4 h-4" /> Begin Review
+            </button>
+          )}
           <button
             data-testid="button-view-profile"
             onClick={() => navigate("/profile")}
-            className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+            className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors inline-flex items-center gap-2"
           >
             <Eye className="w-4 h-4" /> View Profile
           </button>
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function ViolationCard({ violation }: { violation: any }) {
+  const confidenceColors: Record<string, string> = {
+    confirmed: "border-green-500/30 text-green-400 bg-green-500/10",
+    likely: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10",
+    possible: "border-orange-500/30 text-orange-400 bg-orange-500/10",
+  };
+
+  return (
+    <div data-testid={`violation-${violation.id}`} className="bg-background border border-border rounded-lg p-4">
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <SeverityBadge severity={violation.severity} />
+        <span className="text-sm text-white font-medium">{violation.violationType}</span>
+        {violation.confidence && (
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
+            {violation.confidence}
+          </span>
+        )}
+      </div>
+      <p className="text-xs font-mono text-muted-foreground leading-relaxed">{violation.explanation}</p>
+      {violation.evidence && (
+        <p className="text-xs font-mono text-muted-foreground/70 mt-1.5 italic">Evidence: {violation.evidence}</p>
+      )}
+      {violation.evidenceRequired && (
+        <p className="text-xs font-mono text-yellow-400/70 mt-1">Evidence needed: {violation.evidenceRequired}</p>
+      )}
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-mono text-primary">{violation.fcraStatute}</span>
+        {violation.matchedRule && (
+          <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{violation.matchedRule}</span>
+        )}
+      </div>
+      {violation.croReminder && (
+        <p className="text-xs font-mono text-yellow-400/60 mt-2 italic">CRO: {violation.croReminder}</p>
+      )}
+    </div>
   );
 }
 

@@ -2,13 +2,15 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import {
   Shield, FileText, AlertTriangle,
-  Loader2, BarChart3, TrendingUp
+  Loader2, BarChart3, TrendingUp, Eye
 } from "lucide-react";
 import { fetchScans, fetchScan } from "@/lib/api";
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 
 export default function ProfileView() {
   const [allData, setAllData] = useState<any>(null);
+  const [, navigate] = useLocation();
 
   const { data: scans = [], isLoading } = useQuery({
     queryKey: ["scans"],
@@ -28,7 +30,7 @@ export default function ProfileView() {
       const allViolations: any[] = [];
       fullScans.forEach((s: any) => {
         (s.negativeAccounts || []).forEach((a: any) => {
-          allAccounts.push({ ...a, scanConsumerName: s.consumerName });
+          allAccounts.push({ ...a, scanConsumerName: s.consumerName, scanId: s.id });
           (a.violations || []).forEach((v: any) => allViolations.push({ ...v, creditor: a.creditor }));
         });
       });
@@ -60,6 +62,17 @@ export default function ProfileView() {
 
   const stepCounts = allData.accounts.reduce((acc: Record<string, number>, a: any) => {
     acc[a.workflowStep] = (acc[a.workflowStep] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // Category breakdown
+  const fcraCount = allData.violations.filter((v: any) => !v.category || v.category === "FCRA_REPORTING").length;
+  const fdcpaCount = allData.violations.filter((v: any) => v.category && v.category !== "FCRA_REPORTING").length;
+
+  // Review status counts
+  const reviewCounts = allData.violations.reduce((acc: Record<string, number>, v: any) => {
+    const rs = v.reviewStatus || "pending";
+    acc[rs] = (acc[rs] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
@@ -112,6 +125,19 @@ export default function ProfileView() {
               ))}
               {totalViolations === 0 && <p className="text-xs font-mono text-muted-foreground mt-2">No violations detected yet</p>}
             </div>
+            {/* Category breakdown */}
+            {totalViolations > 0 && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-blue-400">FCRA Reporting</span>
+                  <span className="text-white">{fcraCount}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-purple-400">Debt Collector (FDCPA)</span>
+                  <span className="text-white">{fdcpaCount}</span>
+                </div>
+              </div>
+            )}
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
@@ -132,8 +158,70 @@ export default function ProfileView() {
               })}
               {totalAccounts === 0 && <p className="text-xs font-mono text-muted-foreground">No accounts yet</p>}
             </div>
+            {/* Review status breakdown */}
+            {totalViolations > 0 && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                <h4 className="text-xs font-mono text-muted-foreground mb-2">Review Status</h4>
+                {["confirmed", "modified", "rejected", "needs_info", "pending"].map((rs) => {
+                  const count = reviewCounts[rs] || 0;
+                  if (count === 0) return null;
+                  return (
+                    <div key={rs} className="flex items-center justify-between">
+                      <ReviewStatusBadge status={rs} />
+                      <span className="text-sm font-mono text-white">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
         </div>
+
+        {/* Scans with review status */}
+        {allData.scans.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
+            <h3 className="font-display text-lg text-white mb-4">Scans Overview</h3>
+            <div className="space-y-3">
+              {allData.scans.map((s: any) => {
+                const scanViolations = allData.violations.filter((v: any) => {
+                  const acct = allData.accounts.find((a: any) => a.id === v.negativeAccountId);
+                  return acct && acct.scanId === s.id;
+                });
+                const isApproved = s.reviewStatus === "approved" || s.reviewStatus === "exported";
+                return (
+                  <div key={s.id} className="bg-card border border-border rounded-xl p-5 hover:border-primary/30 transition-colors cursor-pointer"
+                    onClick={() => navigate(`/review/${s.id}`)}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-display text-white">{s.consumerName}</h4>
+                        <div className="flex items-center gap-3 mt-1">
+                          <span className="text-xs font-mono text-muted-foreground">
+                            {new Date(s.createdAt).toLocaleDateString()}
+                          </span>
+                          <ScanStatusBadge status={s.status} reviewStatus={s.reviewStatus} />
+                          {scanViolations.length > 0 && (
+                            <span className="text-xs font-mono text-destructive">{scanViolations.length} violations</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isApproved ? (
+                          <span className="text-xs font-mono text-green-400 flex items-center gap-1">
+                            <Shield className="w-3 h-3" /> Approved
+                          </span>
+                        ) : scanViolations.length > 0 ? (
+                          <span className="px-3 py-1.5 bg-primary text-black font-medium rounded-lg text-xs inline-flex items-center gap-1">
+                            <Eye className="w-3 h-3" /> Review
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
 
         {allData.accounts.length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
@@ -180,23 +268,68 @@ export default function ProfileView() {
           </motion.div>
         )}
 
+        {/* Violations grouped by FCRA / FDCPA */}
         {allData.violations.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-            <h3 className="font-display text-lg text-white mb-4">All Detected Violations</h3>
-            <div className="space-y-3">
-              {allData.violations.map((v: any) => (
-                <div key={v.id} data-testid={`profile-violation-${v.id}`} className="bg-card border border-border rounded-lg p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <SeverityBadge severity={v.severity} />
-                    <span className="text-sm text-white font-medium">{v.violationType}</span>
-                    <span className="text-xs font-mono text-muted-foreground ml-auto">{v.creditor}</span>
-                  </div>
-                  <p className="text-xs font-mono text-muted-foreground">{v.explanation}</p>
-                  <div className="mt-1 text-xs font-mono text-primary">{v.fcraStatute}</div>
+          <>
+            {fcraCount > 0 && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
+                <h3 className="font-display text-lg text-white mb-4 flex items-center gap-2">
+                  <span className="text-blue-400">FCRA Reporting Violations</span>
+                  <span className="text-xs font-mono text-muted-foreground">({fcraCount})</span>
+                </h3>
+                <div className="space-y-3">
+                  {allData.violations
+                    .filter((v: any) => !v.category || v.category === "FCRA_REPORTING")
+                    .map((v: any) => (
+                      <ViolationProfileCard key={v.id} violation={v} />
+                    ))}
                 </div>
-              ))}
-            </div>
-          </motion.div>
+              </motion.div>
+            )}
+
+            {fdcpaCount > 0 && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
+                <h3 className="font-display text-lg text-white mb-4 flex items-center gap-2">
+                  <span className="text-purple-400">Debt Collector Conduct Violations</span>
+                  <span className="text-xs font-mono text-muted-foreground">({fdcpaCount})</span>
+                </h3>
+                <div className="space-y-3">
+                  {allData.violations
+                    .filter((v: any) => v.category && v.category !== "FCRA_REPORTING")
+                    .map((v: any) => (
+                      <ViolationProfileCard key={v.id} violation={v} />
+                    ))}
+                </div>
+              </motion.div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ViolationProfileCard({ violation }: { violation: any }) {
+  return (
+    <div data-testid={`profile-violation-${violation.id}`} className="bg-card border border-border rounded-lg p-4">
+      <div className="flex items-center gap-3 mb-2 flex-wrap">
+        <SeverityBadge severity={violation.severityOverride || violation.severity} />
+        <span className="text-sm text-white font-medium">{violation.violationType}</span>
+        {violation.confidence && (
+          <ConfidenceBadge confidence={violation.confidence} />
+        )}
+        {violation.reviewStatus && violation.reviewStatus !== "pending" && (
+          <ReviewStatusBadge status={violation.reviewStatus} />
+        )}
+        <span className="text-xs font-mono text-muted-foreground ml-auto">{violation.creditor}</span>
+      </div>
+      <p className="text-xs font-mono text-muted-foreground">
+        {violation.descriptionOverride || violation.explanation}
+      </p>
+      <div className="mt-1 flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-mono text-primary">{violation.fcraStatute}</span>
+        {violation.matchedRule && (
+          <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{violation.matchedRule}</span>
         )}
       </div>
     </div>
@@ -226,6 +359,61 @@ function SeverityBadge({ severity }: { severity: string }) {
   return (
     <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono border ${colors[severity] || colors.medium}`}>
       {severity}
+    </span>
+  );
+}
+
+function ConfidenceBadge({ confidence }: { confidence: string }) {
+  const colors: Record<string, string> = {
+    confirmed: "border-green-500/30 text-green-400 bg-green-500/10",
+    likely: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10",
+    possible: "border-orange-500/30 text-orange-400 bg-orange-500/10",
+  };
+  return (
+    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colors[confidence] || "border-border text-muted-foreground"}`}>
+      {confidence}
+    </span>
+  );
+}
+
+function ReviewStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: string }> = {
+    confirmed: { label: "Confirmed", color: "border-green-500/30 text-green-400 bg-green-500/10" },
+    modified: { label: "Modified", color: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10" },
+    rejected: { label: "Rejected", color: "border-red-500/30 text-red-400 bg-red-500/10" },
+    needs_info: { label: "Needs Info", color: "border-blue-500/30 text-blue-400 bg-blue-500/10" },
+    pending: { label: "Pending", color: "border-border text-muted-foreground bg-secondary" },
+  };
+  const info = map[status] || map.pending;
+  return (
+    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${info.color}`}>
+      {info.label}
+    </span>
+  );
+}
+
+function ScanStatusBadge({ status, reviewStatus }: { status: string; reviewStatus?: string }) {
+  if (reviewStatus === "approved" || reviewStatus === "exported") {
+    return (
+      <span className="text-xs font-mono px-2 py-0.5 rounded border border-green-500/30 text-green-400 bg-green-500/10">
+        approved
+      </span>
+    );
+  }
+  if (reviewStatus === "in_progress") {
+    return (
+      <span className="text-xs font-mono px-2 py-0.5 rounded border border-purple-500/30 text-purple-400 bg-purple-500/10">
+        under review
+      </span>
+    );
+  }
+  const colors: Record<string, string> = {
+    completed: "border-green-500/30 text-green-400 bg-green-500/10",
+    in_progress: "border-primary/30 text-primary bg-primary/10",
+  };
+  return (
+    <span className={`text-xs font-mono px-2 py-0.5 rounded border ${colors[status] || "border-border text-muted-foreground bg-secondary"}`}>
+      {status === "in_progress" ? "In Progress" : status}
     </span>
   );
 }

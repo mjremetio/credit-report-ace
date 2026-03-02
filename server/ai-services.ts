@@ -13,6 +13,12 @@ export interface DetectedViolation {
   fcraStatute: string;
   evidence: string;
   matchedRule: string;
+  category?: string;
+  evidenceRequired?: string;
+  evidenceProvided?: boolean;
+  evidenceNotes?: string | null;
+  confidence?: string;
+  croReminder?: string | null;
 }
 
 const VIOLATION_SYSTEM_PROMPT = `You are LEXA, an expert FCRA (Fair Credit Reporting Act) violation detection agent. You analyze individual credit account details provided by a consumer and identify potential reporting violations.
@@ -74,11 +80,53 @@ const VIOLATION_SYSTEM_PROMPT = `You are LEXA, an expert FCRA (Fair Credit Repor
 - §1681s-2(b): Furnisher Failure After CRA Dispute
 - §1681g: Failure to Disclose Required Information
 
+In addition to FCRA reporting violations, analyze the account for DEBT COLLECTOR CONDUCT VIOLATIONS under the Fair Debt Collection Practices Act (FDCPA) and related state laws.
+
+For each violation found, return:
+- violation_type, severity, description, evidence_needed, confidence, cro_reminder
+
+VIOLATIONS TO CHECK:
+
+1. DEBT_COLLECTOR_DISCLOSURE (High)
+   Flag if written communications lack the "mini-Miranda" disclosure — stating they are attempting to collect a debt and the communication is from a debt collector.
+   Evidence: Letters, emails, texts, voicemail transcripts lacking disclosure.
+
+2. CA_LICENSE_MISSING (High) — CALIFORNIA ONLY
+   Flag if collector correspondence lacks California debt collector license number. ONLY apply when client state is CA.
+   Evidence: Correspondence missing license number.
+
+3. CEASE_CONTACT_VIOLATION (Critical)
+   Flag if ALL THREE: (1) client sent written stop request, (2) proof collector received it, (3) contact continued after receipt.
+   Evidence: Stop letter, delivery proof, subsequent contact docs.
+
+4. INCONVENIENT_CONTACT (High)
+   Flag if calls before 8 AM / after 9 PM, calls to workplace, or continued after client said inconvenient or at work.
+   Evidence: Recorded calls, call logs with timestamps.
+
+5. THIRD_PARTY_DISCLOSURE (Critical)
+   Flag if collector contacted spouse/family/employer/friend and disclosed the debt.
+   Evidence: Third-party statements, call logs to non-debtor numbers, misdirected correspondence.
+
+6. HARASSMENT_EXCESSIVE_CALLS (High)
+   Flag if: 7+ calls in 7 days (CFPB Reg F), 3+ calls same day, back-to-back calls, threatening/abusive language.
+   Evidence: Call logs, history screenshots, recordings.
+
+CRO REMINDERS for every debt collector account:
+- Ask about ALL communication activity
+- Request ALL letters, texts, emails, voicemails
+- Ask about recorded calls
+- Strong violations REQUIRE documentation before escalation
+
 ## SEVERITY:
 - "critical": Clear statutory violation, strong litigation potential
 - "high": Strong evidence of inaccuracy, likely actionable
 - "medium": Inconsistency that warrants dispute
 - "low": Minor discrepancy worth noting
+
+## CONFIDENCE:
+- "confirmed": Clear evidence in the account data
+- "likely": Strong indicators present but some details missing
+- "possible": Pattern suggests violation but requires additional documentation
 
 Return ONLY valid JSON:
 {
@@ -87,23 +135,27 @@ Return ONLY valid JSON:
       "violationType": "Human readable title",
       "severity": "critical|high|medium|low",
       "explanation": "Detailed explanation",
-      "fcraStatute": "§1681x(y) - Description",
+      "fcraStatute": "§1681x(y) - Description or FDCPA §807/§806 etc.",
       "evidence": "Specific data points from the account",
-      "matchedRule": "RULE_NAME"
+      "matchedRule": "RULE_NAME",
+      "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS",
+      "evidence_required": "What documentation is needed to prove this violation",
+      "confidence": "confirmed|likely|possible",
+      "cro_reminder": "Reminder for CRO analyst about what to ask client"
     }
   ]
 }
 
-Be thorough but precise. Only flag genuine potential issues. If the account details are sparse, focus on what can be determined from the available information. Always check for the most common issues: balance accuracy, date consistency, proper creditor identification, and bureau consistency.`;
+Be thorough but precise. Only flag genuine potential issues. If the account details are sparse, focus on what can be determined from the available information. Always check for the most common issues: balance accuracy, date consistency, proper creditor identification, and bureau consistency. For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector conduct violations, use the specific category name.`;
 
-export async function detectViolations(account: NegativeAccount): Promise<DetectedViolation[]> {
-  const accountDetails = buildAccountDescription(account);
+export async function detectViolations(account: NegativeAccount, clientState?: string | null): Promise<DetectedViolation[]> {
+  const accountDetails = buildAccountDescription(account, clientState);
 
   const response = await openai.chat.completions.create({
     model: "gpt-5.2",
     messages: [
       { role: "system", content: VIOLATION_SYSTEM_PROMPT },
-      { role: "user", content: `Analyze this negative credit account for potential FCRA violations:\n\n${accountDetails}` }
+      { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations:\n\n${accountDetails}` }
     ],
     response_format: { type: "json_object" },
     max_completion_tokens: 4096,
@@ -112,13 +164,27 @@ export async function detectViolations(account: NegativeAccount): Promise<Detect
   const raw = response.choices[0]?.message?.content || "{}";
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed.violations) ? parsed.violations : [];
+    const violations = Array.isArray(parsed.violations) ? parsed.violations : [];
+    return violations.map((v: any) => ({
+      violationType: v.violationType || v.violation_type || "",
+      severity: v.severity || "medium",
+      explanation: v.explanation || v.description || "",
+      fcraStatute: v.fcraStatute || v.fcra_statute || "",
+      evidence: v.evidence || "",
+      matchedRule: v.matchedRule || v.matched_rule || "",
+      category: v.category || "FCRA_REPORTING",
+      evidenceRequired: v.evidence_required || v.evidenceRequired || "",
+      evidenceProvided: false,
+      evidenceNotes: v.evidence_notes || null,
+      confidence: v.confidence || "possible",
+      croReminder: v.cro_reminder || v.croReminder || null,
+    }));
   } catch {
     return [];
   }
 }
 
-function buildAccountDescription(account: NegativeAccount): string {
+function buildAccountDescription(account: NegativeAccount, clientState?: string | null): string {
   const lines = [
     `Creditor: ${account.creditor}`,
     `Account Type: ${formatAccountType(account.accountType)}`,
@@ -130,6 +196,7 @@ function buildAccountDescription(account: NegativeAccount): string {
   if (account.dateOfDelinquency) lines.push(`Date of First Delinquency: ${account.dateOfDelinquency}`);
   if (account.status) lines.push(`Reported Status: ${account.status}`);
   if (account.bureaus) lines.push(`Reporting Bureaus: ${account.bureaus}`);
+  if (clientState) lines.push(`Client State: ${clientState}`);
   if (account.rawDetails) lines.push(`\nRaw Report Text:\n${account.rawDetails}`);
   return lines.join("\n");
 }

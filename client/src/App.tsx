@@ -8,6 +8,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Upload from "@/pages/Upload";
 import ScanWizard from "@/pages/ScanWizard";
+import ReviewDashboard from "@/pages/ReviewDashboard";
 import ProfileView from "@/pages/ProfileView";
 
 function Router() {
@@ -17,6 +18,7 @@ function Router() {
         <Route path="/" component={Home} />
         <Route path="/upload" component={Upload} />
         <Route path="/scan/:id" component={ScanWizard} />
+        <Route path="/review/:id" component={ReviewDashboard} />
         <Route path="/profile" component={ProfileView} />
         <Route component={NotFound} />
       </Switch>
