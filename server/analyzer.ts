@@ -5,6 +5,8 @@ import { PDFParse } from "pdf-parse";
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  timeout: 300_000, // 5 minutes per request
+  maxRetries: 2,
 });
 
 export interface AnalysisResult {
@@ -16,6 +18,20 @@ export interface AnalysisResult {
     status: string;
     balance: number;
     dates: { dofd?: string; last_payment?: string };
+    bureaus?: string;
+    bureauDetails?: Array<{
+      bureau: string;
+      accountNumber?: string;
+      balance?: number;
+      status?: string;
+      dateOpened?: string;
+      lastPayment?: string;
+      highBalance?: number;
+      creditLimit?: number;
+      paymentStatus?: string;
+      accountRating?: string;
+      creditorType?: string;
+    }>;
   }>;
   findings: Array<{
     findingType: string;
@@ -31,18 +47,133 @@ export interface AnalysisResult {
 function extractTextFromHtml(html: string): string {
   const $ = cheerio.load(html);
   $("script, style, noscript").remove();
-  const text = $("body").text().replace(/\s+/g, " ").trim();
-  return text.slice(0, 60000);
+
+  const lines: string[] = [];
+
+  // Extract tables with preserved column structure (critical for tri-merge bureau reports)
+  $("table").each((_i, table) => {
+    const rows: string[][] = [];
+    $(table).find("tr").each((_j, tr) => {
+      const cells: string[] = [];
+      $(tr).find("th, td").each((_k, cell) => {
+        const text = $(cell).text().replace(/\s+/g, " ").trim();
+        cells.push(text);
+      });
+      if (cells.length > 0) rows.push(cells);
+    });
+    if (rows.length === 0) return;
+
+    // Detect bureau header rows (TransUnion/Experian/Equifax pattern)
+    const isBureauTable = rows.some(row =>
+      row.some(cell => /transunion|experian|equifax/i.test(cell))
+    );
+
+    for (const row of rows) {
+      if (isBureauTable && row.length >= 3) {
+        // Preserve column alignment: "Label | TU Value | EX Value | EQ Value"
+        lines.push(row.join(" | "));
+      } else {
+        lines.push(row.join(" | "));
+      }
+    }
+    lines.push(""); // separator between tables
+  });
+
+  // Also extract non-table text content (headings, paragraphs, lists)
+  $("table").remove(); // remove tables since we already extracted them
+  $("h1, h2, h3, h4, h5, h6, p, li, div, span, section").each((_i, el) => {
+    // Only extract direct text nodes to avoid duplication
+    const directText = $(el).contents()
+      .filter(function() { return this.type === "text"; })
+      .text().replace(/\s+/g, " ").trim();
+    if (directText.length > 2) {
+      lines.push(directText);
+    }
+  });
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function cleanRawText(content: string): string {
-  return content.replace(/\s+/g, " ").trim().slice(0, 60000);
+  return content.replace(/\s+/g, " ").trim();
+}
+
+// ~10 pages per chunk (approx 4000 chars/page)
+const CHUNK_SIZE = 40_000;
+
+function chunkText(text: string): string[] {
+  if (text.length <= CHUNK_SIZE) return [text];
+  const chunks: string[] = [];
+  let offset = 0;
+  while (offset < text.length) {
+    let end = Math.min(offset + CHUNK_SIZE, text.length);
+    // Try to break at a sentence or whitespace boundary
+    if (end < text.length) {
+      const lastPeriod = text.lastIndexOf(". ", end);
+      if (lastPeriod > offset + CHUNK_SIZE * 0.7) {
+        end = lastPeriod + 2;
+      } else {
+        const lastSpace = text.lastIndexOf(" ", end);
+        if (lastSpace > offset + CHUNK_SIZE * 0.7) {
+          end = lastSpace + 1;
+        }
+      }
+    }
+    chunks.push(text.slice(offset, end));
+    offset = end;
+  }
+  return chunks;
+}
+
+function mergeAnalysisResults(results: AnalysisResult[]): AnalysisResult {
+  const consumerName = results.find(r => r.consumerName && r.consumerName !== "Unknown Consumer")?.consumerName || "Unknown Consumer";
+
+  // Deduplicate accounts by creditor + masked account number
+  const seenAccounts = new Map<string, AnalysisResult["accounts"][0]>();
+  for (const r of results) {
+    for (const acct of r.accounts) {
+      const key = `${(acct.creditor || "").toLowerCase().trim()}|${acct.accountNumberMasked || ""}`;
+      if (!seenAccounts.has(key)) {
+        seenAccounts.set(key, acct);
+      }
+    }
+  }
+
+  // Deduplicate findings by creditor + matchedRule
+  const seenFindings = new Map<string, AnalysisResult["findings"][0]>();
+  for (const r of results) {
+    for (const f of r.findings) {
+      const key = `${(f.creditor || "").toLowerCase().trim()}|${f.matchedRule || ""}|${f.findingType || ""}`;
+      if (!seenFindings.has(key)) {
+        seenFindings.set(key, f);
+      }
+    }
+  }
+
+  return {
+    consumerName,
+    accounts: Array.from(seenAccounts.values()),
+    findings: Array.from(seenFindings.values()),
+  };
 }
 
 const SYSTEM_PROMPT = `You are LEXA, an expert FCRA (Fair Credit Reporting Act) credit report analysis agent. You are given raw text extracted from a consumer credit report. Your job is to:
 
 1. EXTRACT all accounts/tradelines with their key data points
 2. DETECT potential FCRA violations by applying the following rule engine
+
+## CRITICAL: TRI-MERGE CREDIT REPORT FORMAT
+Most credit reports are TRI-MERGE reports with 3 bureau columns: TransUnion, Experian, and Equifax.
+The data is structured as: "Field Label | TransUnion Value | Experian Value | Equifax Value"
+
+**IMPORTANT PARSING RULES:**
+- Each account section shows data across ALL 3 bureaus side by side
+- Data may be cut off, interleaved, or wrapped across lines — use context to reassemble fields intelligently
+- "--" means the bureau does not report that field (not the same as $0 or empty)
+- Compare values ACROSS bureaus to detect discrepancies (different balances, dates, statuses, account numbers, creditor types)
+- Extract PER-BUREAU details for each account: account number, balance, status, dates, high balance, credit limit, payment status, creditor type, and account rating
+- Personal information (Name, DOB, Address, Employer) is also reported per-bureau — check for inconsistencies
+- When the same account has different values across bureaus, this is a KEY signal for potential FCRA violations
 
 ## FCRA VIOLATION RULES TO CHECK:
 
@@ -100,11 +231,53 @@ Return ONLY valid JSON matching this exact structure:
   "accounts": [
     {
       "creditor": "CREDITOR NAME",
-      "accountNumberMasked": "....XXXX",
+      "accountNumberMasked": "....XXXX (use the most complete masked number)",
       "type": "revolving|installment|collection|mortgage|other",
-      "status": "current status",
+      "status": "current status (most severe across bureaus)",
       "balance": 0,
-      "dates": { "dofd": "YYYY-MM or null", "last_payment": "YYYY-MM or null" }
+      "dates": { "dofd": "YYYY-MM or null", "last_payment": "YYYY-MM or null" },
+      "bureaus": "TransUnion, Experian, Equifax (list which bureaus report this account)",
+      "bureauDetails": [
+        {
+          "bureau": "TransUnion",
+          "accountNumber": "431503**********",
+          "balance": 40,
+          "status": "Open",
+          "dateOpened": "2023-10",
+          "lastPayment": "2025-11",
+          "highBalance": 488,
+          "creditLimit": 300,
+          "paymentStatus": "Current",
+          "accountRating": "Open",
+          "creditorType": "Bank Credit Cards"
+        },
+        {
+          "bureau": "Experian",
+          "accountNumber": "431503******",
+          "balance": 40,
+          "status": "Open",
+          "dateOpened": "2023-10",
+          "lastPayment": "2025-11",
+          "highBalance": 488,
+          "creditLimit": 300,
+          "paymentStatus": "Current",
+          "accountRating": "Open",
+          "creditorType": "Bank Credit Cards"
+        },
+        {
+          "bureau": "Equifax",
+          "accountNumber": "431503*********",
+          "balance": 40,
+          "status": "Open",
+          "dateOpened": "2023-10",
+          "lastPayment": "2025-12",
+          "highBalance": 0,
+          "creditLimit": 300,
+          "paymentStatus": "Current",
+          "accountRating": "Open",
+          "creditorType": "Miscellaneous Finance"
+        }
+      ]
     }
   ],
   "findings": [
@@ -112,13 +285,15 @@ Return ONLY valid JSON matching this exact structure:
       "findingType": "Human readable finding title",
       "severity": "critical|high|medium|low",
       "creditor": "CREDITOR NAME or Personal Info",
-      "explanation": "Detailed explanation of why this is a potential violation",
+      "explanation": "Detailed explanation referencing specific bureau discrepancies",
       "fcraTheories": ["§1681e(b) - Description"],
       "evidence": [{ "bureau": "Bureau Name", "quote": "Exact text or data from report" }],
       "matchedRule": "RULE_NAME_FROM_LIST"
     }
   ]
 }
+
+IMPORTANT: For each account, you MUST populate the "bureauDetails" array with per-bureau data. Compare values across bureaus to identify cross-bureau discrepancies (different balances, high balances, creditor types, dates, statuses). Even small differences like "Bank Credit Cards" vs "Miscellaneous Finance" for creditor type are significant findings.
 
 In addition to FCRA reporting violations, analyze the report for DEBT COLLECTOR CONDUCT VIOLATIONS under the Fair Debt Collection Practices Act (FDCPA) and related state laws.
 
@@ -167,10 +342,89 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   const result = await parser.getText();
   await parser.destroy();
   const text = result.pages.map((p: any) => p.text).join(" ");
-  return text.replace(/\s+/g, " ").trim().slice(0, 60000);
+  return text.replace(/\s+/g, " ").trim();
 }
 
-export async function analyzeReport(content: string, fileType: string, pdfBuffer?: Buffer): Promise<AnalysisResult> {
+async function analyzeChunk(chunkText: string, chunkIndex: number, totalChunks: number): Promise<AnalysisResult> {
+  const chunkContext = totalChunks > 1
+    ? `This is section ${chunkIndex + 1} of ${totalChunks} from the credit report. Extract ALL accounts and violations found in this section:\n\n`
+    : `Analyze this credit report and extract all accounts and FCRA violations:\n\n`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-5.2",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: `${chunkContext}${chunkText}` }
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 16384,
+  });
+
+  const raw = response.choices[0]?.message?.content || "{}";
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      consumerName: parsed.consumerName || "Unknown Consumer",
+      accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+    };
+  } catch {
+    return { consumerName: "Unknown Consumer", accounts: [], findings: [] };
+  }
+}
+
+async function analyzeImage(imageBuffer: Buffer, mimeType: string): Promise<AnalysisResult> {
+  const base64 = imageBuffer.toString("base64");
+  const mediaType = mimeType.startsWith("image/") ? mimeType : "image/png";
+
+  console.log(`[analyzer] Processing image (${(imageBuffer.length / 1024).toFixed(0)}KB) via vision API`);
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-5.2",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Analyze this credit report image. This is a tri-merge credit report with TransUnion, Experian, and Equifax columns. Extract ALL accounts, personal information, and detect ALL FCRA violations. Pay close attention to per-bureau differences in balances, dates, statuses, and creditor types.",
+          },
+          {
+            type: "image_url",
+            image_url: { url: `data:${mediaType};base64,${base64}` },
+          },
+        ],
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 16384,
+  });
+
+  const raw = response.choices[0]?.message?.content || "{}";
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      consumerName: parsed.consumerName || "Unknown Consumer",
+      accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+    };
+  } catch {
+    return { consumerName: "Unknown Consumer", accounts: [], findings: [] };
+  }
+}
+
+export async function analyzeReport(content: string, fileType: string, pdfBuffer?: Buffer, imageBuffer?: Buffer): Promise<AnalysisResult> {
+  // Handle image files via vision API
+  if (imageBuffer && fileType.startsWith("image/")) {
+    try {
+      return await analyzeImage(imageBuffer, fileType);
+    } catch (err: any) {
+      console.error("AI vision service error:", err?.message || err);
+      throw new Error("AI image analysis service is temporarily unavailable. Please try again in a moment.");
+    }
+  }
+
   let extractedText: string;
 
   if (fileType === "application/pdf" && pdfBuffer) {
@@ -185,36 +439,23 @@ export async function analyzeReport(content: string, fileType: string, pdfBuffer
     throw new Error("Could not extract sufficient text from the uploaded file. The file may be image-based or corrupted.");
   }
 
-  let response;
-  try {
-    response = await openai.chat.completions.create({
-      model: "gpt-5.2",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `Analyze this credit report and extract all accounts and FCRA violations:\n\n${extractedText}` }
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 8192,
-    });
-  } catch (err: any) {
-    console.error("AI service error during report analysis:", err?.message || err);
-    throw new Error("AI analysis service is temporarily unavailable. Please try again in a moment.");
+  const chunks = chunkText(extractedText);
+  console.log(`[analyzer] Extracted ${extractedText.length} chars, split into ${chunks.length} chunk(s) for AI analysis`);
+
+  const results: AnalysisResult[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      console.log(`[analyzer] Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+      const result = await analyzeChunk(chunks[i], i, chunks.length);
+      results.push(result);
+    } catch (err: any) {
+      console.error(`AI service error on chunk ${i + 1}/${chunks.length}:`, err?.message || err);
+      if (results.length === 0) {
+        throw new Error("AI analysis service is temporarily unavailable. Please try again in a moment.");
+      }
+      // Continue with partial results if some chunks succeeded
+    }
   }
 
-  const raw = response.choices[0]?.message?.content || "{}";
-
-  try {
-    const parsed = JSON.parse(raw);
-    return {
-      consumerName: parsed.consumerName || "Unknown Consumer",
-      accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
-      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
-    };
-  } catch {
-    return {
-      consumerName: "Unknown Consumer",
-      accounts: [],
-      findings: [],
-    };
-  }
+  return mergeAnalysisResults(results);
 }

@@ -64,7 +64,7 @@ export default function Upload() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".html,.htm,.pdf,.txt,.csv"
+          accept=".html,.htm,.pdf,.txt,.csv,.png,.jpg,.jpeg,.webp,.gif"
           onChange={handleFileChange}
           className="hidden"
           data-testid="input-file-upload"
@@ -93,7 +93,7 @@ export default function Upload() {
               <p className="text-muted-foreground max-w-md font-mono text-sm">
                 {isProcessing
                   ? "Extracting accounts and scanning for FCRA violations..."
-                  : "Drag and drop a credit report (HTML, PDF, TXT) or click to browse. AI will extract negative accounts and detect violations automatically."}
+                  : "Drag and drop a credit report (HTML, PDF, TXT, or image) or click to browse. AI will extract negative accounts and detect violations automatically."}
               </p>
 
               {isProcessing && (
@@ -118,7 +118,7 @@ export default function Upload() {
               <h4 className="font-display text-white text-sm mb-3">How it works</h4>
               <div className="space-y-3">
                 {[
-                  { step: 1, text: "Upload your credit report file (HTML, PDF, or TXT)" },
+                  { step: 1, text: "Upload your credit report file (HTML, PDF, TXT, or image)" },
                   { step: 2, text: "AI extracts all accounts and identifies negative items" },
                   { step: 3, text: "Each account is scanned for FCRA violations" },
                   { step: 4, text: "Review results in the same workflow as manual entry" },

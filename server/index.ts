@@ -6,6 +6,11 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+// Increase server timeouts to handle large credit report uploads + AI analysis
+httpServer.timeout = 600_000;          // 10 minutes overall request timeout
+httpServer.keepAliveTimeout = 120_000; // 2 minutes keep-alive
+httpServer.headersTimeout = 620_000;   // slightly above timeout
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

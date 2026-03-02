@@ -37,8 +37,11 @@ export default function ReviewDashboard() {
   });
 
   const beginReviewMutation = useMutation({
-    mutationFn: () => updateScan(scanId, { status: "completed" } as any),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scan", scanId] }),
+    mutationFn: () => updateScan(scanId, { reviewStatus: "in_progress" } as any),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
+      queryClient.invalidateQueries({ queryKey: ["review-summary", scanId] });
+    },
   });
 
   const reopenMutation = useMutation({

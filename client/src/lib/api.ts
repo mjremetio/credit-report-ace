@@ -23,6 +23,7 @@ export async function fetchScan(id: number) {
 export async function updateScan(id: number, data: {
   currentStep?: number;
   status?: string;
+  reviewStatus?: string;
   clientName?: string | null;
   clientState?: string | null;
   scanNotes?: string | null;
@@ -78,30 +79,59 @@ export async function deleteNegativeAccount(scanId: number, accountId: number) {
 }
 
 export async function scanAccountForViolations(accountId: number) {
-  const res = await fetch(`/api/accounts/${accountId}/scan`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Failed to scan account for violations");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 min timeout per account scan
+  try {
+    const res = await fetch(`/api/accounts/${accountId}/scan`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Failed to scan account for violations");
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Violation scan timed out. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json();
 }
 
 export async function uploadScanFile(file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch("/api/scans/upload", { method: "POST", body: formData });
-  if (!res.ok) {
-    const text = await res.text();
-    let message = "Upload failed";
-    try {
-      const error = JSON.parse(text);
-      message = error.error || message;
-    } catch {
-      message = text || message;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 600_000); // 10 min timeout for upload + AI analysis
+  try {
+    const res = await fetch("/api/scans/upload", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Upload failed";
+      try {
+        const error = JSON.parse(text);
+        message = error.error || message;
+      } catch {
+        message = text || message;
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Upload timed out. The file may be too large or the server is busy. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json();
 }
 
 // ========== REVIEW WORKFLOW API ==========
