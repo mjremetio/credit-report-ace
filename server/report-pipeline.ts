@@ -126,19 +126,30 @@ export async function runReportPipeline(
     ).join("\n");
 
     const bureauLines = tl.bureauDetails.map(bd => {
+      // Format payment history if available
+      const payHistStr = (bd.paymentHistory && bd.paymentHistory.length > 0)
+        ? `  Payment History: ${bd.paymentHistory.map(ph => `${ph.month}:${ph.code}`).join(", ")}`
+        : null;
+
       const fields = [
         `  Bureau: ${bd.bureau}`,
         bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
         bd.balance != null ? `  Balance: $${bd.balance}` : null,
         bd.status ? `  Status: ${bd.status}` : null,
         bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
+        bd.dateClosed ? `  Date Closed: ${bd.dateClosed}` : null,
         bd.lastPaymentDate ? `  Last Payment: ${bd.lastPaymentDate}` : null,
+        bd.lastReportedDate ? `  Last Reported: ${bd.lastReportedDate}` : null,
         bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
         bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
+        bd.monthlyPayment != null ? `  Monthly Payment: $${bd.monthlyPayment}` : null,
+        bd.pastDueAmount != null ? `  Past Due Amount: $${bd.pastDueAmount}` : null,
         bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
         bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
         bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
+        bd.terms ? `  Terms: ${bd.terms}` : null,
         (bd.remarks && bd.remarks.length > 0) ? `  Remarks: ${bd.remarks.join("; ")}` : null,
+        payHistStr,
       ].filter(Boolean).join("\n");
       return fields;
     }).join("\n---\n");
@@ -148,9 +159,13 @@ export async function runReportPipeline(
       tl.accountNumberMasked ? `Account: ${tl.accountNumberMasked}` : null,
       `Type: ${tl.accountType}`,
       `Status: ${tl.aggregateStatus}`,
+      tl.originalCreditor ? `Original Creditor: ${tl.originalCreditor}` : null,
       tl.balance != null ? `Balance: $${tl.balance}` : null,
+      tl.dates.opened ? `Date Opened: ${tl.dates.opened}` : null,
+      tl.dates.closed ? `Date Closed: ${tl.dates.closed}` : null,
       tl.dates.firstDelinquency ? `DOFD: ${tl.dates.firstDelinquency}` : null,
       tl.dates.lastPayment ? `Last Payment: ${tl.dates.lastPayment}` : null,
+      tl.dates.lastReported ? `Last Reported: ${tl.dates.lastReported}` : null,
       tl.bureaus.length > 0 ? `Bureaus: ${tl.bureaus.join(", ")}` : null,
       tl.remarks.length > 0 ? `\nRemarks:\n${tl.remarks.map(r => `  - ${r}`).join("\n")}` : null,
       bureauLines ? `\nPer-Bureau Details:\n${bureauLines}` : null,
@@ -163,7 +178,7 @@ export async function runReportPipeline(
       accountNumber: tl.accountNumberMasked || null,
       accountType,
       originalCreditor: tl.originalCreditor || null,
-      balance: tl.balance || null,
+      balance: tl.balance != null ? tl.balance : null,
       dateOpened: tl.dates.opened || tl.dates.lastPayment || null,
       dateOfDelinquency: tl.dates.firstDelinquency || null,
       status: tl.aggregateStatus || null,

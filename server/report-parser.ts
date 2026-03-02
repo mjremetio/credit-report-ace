@@ -33,10 +33,13 @@ export interface ReportSection {
 // ── Section header patterns ────────────────────────────────────────
 const SECTION_PATTERNS: Array<{ type: SectionType; pattern: RegExp; label?: string }> = [
   // Personal information block
-  { type: "personal_info", pattern: /(?:^|\n)\s*(?:PERSONAL\s+INFORMATION|Personal\s+Information|CONSUMER\s+INFORMATION|Consumer\s+Information|IDENTIFICATION)/i, label: "Personal Information" },
+  { type: "personal_info", pattern: /(?:^|\n)\s*(?:PERSONAL\s+INFORMATION|Personal\s+Information|CONSUMER\s+INFORMATION|Consumer\s+Information|IDENTIFICATION|Credit\s+Scores?)/i, label: "Personal Information" },
 
   // Bureau summary / account summary
   { type: "bureau_summary", pattern: /(?:^|\n)\s*(?:ACCOUNT\s+SUMMARY|Account\s+Summary|CREDIT\s+SUMMARY|Credit\s+Summary|SUMMARY\s+OF\s+ACCOUNTS)/i, label: "Bureau Summary" },
+
+  // Account details section (contains tradelines)
+  { type: "tradeline", pattern: /(?:^|\n)\s*(?:ACCOUNT\s+DETAILS?|Account\s+Details?|TRADE\s*LINES?|Trade\s*lines?|ACCOUNTS?\s+INFORMATION|Account\s+History)/i, label: "Account Details" },
 
   // Public records
   { type: "public_records", pattern: /(?:^|\n)\s*(?:PUBLIC\s+RECORDS?|Public\s+Records?)/i, label: "Public Records" },
@@ -70,36 +73,68 @@ export function extractTextFromHtml(html: string): string {
   $("script, style, noscript").remove();
 
   const lines: string[] = [];
+  const processed = new Set<any>();
 
-  // Extract tables with preserved column structure (critical for tri-merge reports)
-  $("table").each((_i, table) => {
+  // Walk the DOM in document order so headings stay attached to their tables
+  function extractTable(table: any) {
     const rows: string[][] = [];
-    $(table).find("tr").each((_j, tr) => {
+    $(table).find("tr").each((_j: number, tr: any) => {
       const cells: string[] = [];
-      $(tr).find("th, td").each((_k, cell) => {
+      $(tr).find("th, td").each((_k: number, cell: any) => {
         const text = $(cell).text().replace(/\s+/g, " ").trim();
         cells.push(text);
       });
       if (cells.length > 0) rows.push(cells);
     });
-    if (rows.length === 0) return;
-
-    for (const row of rows) {
-      lines.push(row.join(" | "));
+    if (rows.length > 0) {
+      for (const row of rows) {
+        lines.push(row.join(" | "));
+      }
+      lines.push(""); // separator after table
     }
-    lines.push(""); // separator between tables
+  }
+
+  // Process all top-level elements in document order
+  $("body").children().each((_i, el) => {
+    if (processed.has(el)) return;
+    processed.add(el);
+
+    const tagName = (el as any).tagName?.toLowerCase() || "";
+
+    if (tagName === "table") {
+      extractTable(el);
+    } else {
+      // For non-table elements, extract text content
+      // but also check for nested tables within divs/sections
+      const nestedTables = $(el).find("table");
+      if (nestedTables.length > 0) {
+        // Extract heading text before nested tables
+        const headingText = $(el).clone().find("table").remove().end()
+          .text().replace(/\s+/g, " ").trim();
+        if (headingText.length > 2) {
+          lines.push(headingText);
+        }
+        nestedTables.each((_j: number, table: any) => {
+          extractTable(table);
+        });
+      } else {
+        // Simple text element (heading, paragraph, etc.)
+        const directText = $(el).text().replace(/\s+/g, " ").trim();
+        if (directText.length > 2) {
+          lines.push(directText);
+        }
+      }
+    }
   });
 
-  // Also extract non-table text
-  $("table").remove();
-  $("h1, h2, h3, h4, h5, h6, p, li, div, span, section").each((_i, el) => {
-    const directText = $(el).contents()
-      .filter(function () { return this.type === "text"; })
-      .text().replace(/\s+/g, " ").trim();
-    if (directText.length > 2) {
-      lines.push(directText);
-    }
-  });
+  // If body had no direct children structure, fall back to walking key elements
+  if (lines.length === 0) {
+    $("h1, h2, h3, h4, h5, h6, p, li").each((_i, el) => {
+      const text = $(el).text().replace(/\s+/g, " ").trim();
+      if (text.length > 2) lines.push(text);
+    });
+    $("table").each((_i, table) => { extractTable(table); });
+  }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -243,9 +278,12 @@ function splitTradelineSection(text: string, baseOffset: number): ReportSection[
       currentLabel = extractCreditorName(line);
       blockStart = charOffset;
     } else {
-      if (currentBlock.length === 0 && isCreditorHeader) {
+      if (isCreditorHeader && !currentLabel) {
+        // First creditor found (or at the start of section)
         currentLabel = extractCreditorName(line);
-        blockStart = charOffset;
+        if (currentBlock.length === 0) {
+          blockStart = charOffset;
+        }
       }
       currentBlock.push(line);
     }
@@ -289,6 +327,13 @@ function isLikelyCreditorName(line: string, nextLine: string): boolean {
   if (/^\d+$/.test(trimmed)) return false;
   if (/^[-=_|]+$/.test(trimmed)) return false;
   if (/^(page|PAGE)\s+\d/i.test(trimmed)) return false;
+  // Skip known section headers
+  if (/^(Personal\s+Information|Account\s+Summary|Account\s+Details|Public\s+Records|Inquiries|Credit\s+Report|Credit\s+Scores?|Addresses|Employers|How\s+it\s+works|No\s+public)/i.test(trimmed)) return false;
+  // Skip table header rows (Field | TransUnion | Experian | Equifax)
+  if (/^(Field|Summary|Bureau|Creditor|Address|Employer)\s*\|/i.test(trimmed)) return false;
+  // Skip table data rows that look like field labels with pipe separators
+  // e.g. "Credit Limit | $5,000 | $5,000 | --" or "Account Type | Revolving | ..."
+  if (trimmed.includes("|") && /^(Account\s+(Number|Type|Rating)|Status|Balance|Credit\s+Limit|High\s+Balance|Monthly\s+Payment|Date\s+|Last\s+|Payment\s+(Status|History)|Creditor\s+Type|Past\s+Due|Terms|Remarks|Original)/i.test(trimmed)) return false;
 
   // Check for common creditor patterns
   const hasCreditorIndicator = CREDITOR_INDICATORS.some(p => p.test(trimmed));
@@ -297,15 +342,22 @@ function isLikelyCreditorName(line: string, nextLine: string): boolean {
   const upperRatio = (trimmed.match(/[A-Z]/g) || []).length / trimmed.length;
   const isUpperCase = upperRatio > 0.6 && trimmed.length > 5 && trimmed.length < 50;
 
+  // Standalone creditor name line (not pipe-separated), followed by pipe-separated table data
+  const nextIsPipeLine = /\|/.test(nextLine);
+  const nextHasFieldLabel = /^(Field|Account|Status|Balance)\s*\|/i.test(nextLine.trim());
+
   // Pipe-separated line with a name-like first segment (tri-merge format)
   const pipeSegments = trimmed.split("|").map(s => s.trim());
   const isPipeHeader = pipeSegments.length >= 2 && pipeSegments[0].length > 3 && /[A-Z]/.test(pipeSegments[0]);
 
   // Next line contains account-type data
-  const nextHasAccountData = /(?:account|balance|status|opened|payment|type|bureau|credit)/i.test(nextLine);
+  const nextHasAccountData = /(?:account|balance|status|opened|payment|type|bureau|credit|field)/i.test(nextLine);
 
+  // Standalone creditor name before a table
+  if (hasCreditorIndicator && !trimmed.includes("|") && (nextIsPipeLine || nextHasFieldLabel)) return true;
   if (hasCreditorIndicator && (isUpperCase || isPipeHeader || nextHasAccountData)) return true;
   if (isUpperCase && nextHasAccountData) return true;
+  if (isUpperCase && hasCreditorIndicator && !trimmed.includes("|")) return true;
   if (isPipeHeader && hasCreditorIndicator) return true;
 
   return false;
