@@ -20,10 +20,13 @@ import { detectViolations } from "./ai-services";
 import type {
   ParsedCreditReport,
   Tradeline,
+  TradeBureauDetail,
   IssueFlag,
   OrganizedCreditReport,
   CreditorContact,
   Bureau,
+  AccountType,
+  AccountStatus,
 } from "@shared/credit-report-types";
 
 export interface PipelineResult {
@@ -386,10 +389,259 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
   };
 }
 
+/**
+ * Manual Entry Pipeline
+ *
+ * Converts manually entered NegativeAccounts into the structured ParsedCreditReport
+ * format, then runs issue flags, summary generation, and AI violation detection.
+ *
+ * Manual Workflow:
+ *   Manual Data Entry → Convert into Structured JSON → AI Analysis → Paralegal Review → Export
+ */
+export async function runManualEntryPipeline(scanId: number): Promise<PipelineResult> {
+  const scan = await storage.getScan(scanId);
+  if (!scan) throw new Error("Scan not found");
+
+  const negAccounts = await storage.getNegativeAccountsByScan(scanId);
+  if (negAccounts.length === 0) throw new Error("No accounts to analyze");
+
+  console.log(`[manual-pipeline] Converting ${negAccounts.length} manual accounts to structured JSON`);
+
+  // ── Step 1: Convert manual entries into structured tradelines ──
+  const tradelines: Tradeline[] = negAccounts.map(acct => {
+    const bureauNames = (acct.bureaus || "TransUnion, Experian, Equifax")
+      .split(",")
+      .map(b => b.trim())
+      .filter(Boolean);
+    const bureaus: Bureau[] = bureauNames
+      .map(b => {
+        const n = b.toLowerCase();
+        if (n.includes("transunion") || n === "tu") return "TransUnion" as Bureau;
+        if (n.includes("experian") || n === "ex") return "Experian" as Bureau;
+        if (n.includes("equifax") || n === "eq") return "Equifax" as Bureau;
+        return null;
+      })
+      .filter((b): b is Bureau => b !== null);
+
+    if (bureaus.length === 0) bureaus.push("TransUnion", "Experian", "Equifax");
+
+    const accountType = mapManualAccountType(acct.accountType);
+    const aggregateStatus = mapManualStatus(acct.status || acct.accountType);
+
+    const bureauDetails: TradeBureauDetail[] = bureaus.map(bureau => ({
+      bureau,
+      accountNumber: acct.accountNumber || undefined,
+      balance: acct.balance != null ? Number(acct.balance) : null,
+      status: acct.status || undefined,
+      dateOpened: acct.dateOpened || undefined,
+      creditLimit: null,
+      highBalance: null,
+      monthlyPayment: null,
+      pastDueAmount: null,
+      paymentHistory: [],
+      remarks: [],
+    }));
+
+    return {
+      creditorName: acct.creditor,
+      accountNumberMasked: acct.accountNumber || undefined,
+      accountType,
+      aggregateStatus,
+      originalCreditor: acct.originalCreditor || undefined,
+      balance: acct.balance != null ? Number(acct.balance) : null,
+      bureaus,
+      bureauDetails,
+      dates: {
+        opened: acct.dateOpened || undefined,
+        firstDelinquency: acct.dateOfDelinquency || undefined,
+      },
+      remarks: [],
+      evidenceText: acct.rawDetails || "",
+    };
+  });
+
+  // ── Step 2: Build the ParsedCreditReport structure ──
+  const parsedReport: ParsedCreditReport = {
+    profile: {
+      name: scan.consumerName,
+      reportDate: new Date().toISOString().split("T")[0],
+      scores: [],
+      addresses: [],
+      employers: [],
+    },
+    bureauSummaries: [],
+    tradelines,
+    publicRecords: [],
+    inquiries: [],
+    consumerStatements: [],
+    issueFlags: [],
+    summary: { accountOneLiners: [], categorySummaries: [], actionPlan: [] },
+    metadata: {
+      parsedAt: new Date().toISOString(),
+      sourceFileName: "manual-entry",
+      sourceFileType: "manual",
+      parserVersion: "2.0.0-manual",
+    },
+  };
+
+  // ── Step 3: Compute deterministic issue flags ──
+  console.log(`[manual-pipeline] Step 3: Computing deterministic issue flags`);
+  parsedReport.issueFlags = computeIssueFlags(parsedReport);
+  console.log(`[manual-pipeline] ${parsedReport.issueFlags.length} issue flags detected`);
+
+  // ── Step 4: Generate hierarchical summaries ──
+  console.log(`[manual-pipeline] Step 4: Generating summaries`);
+  parsedReport.summary = generateReportSummary(parsedReport);
+
+  // ── Step 5: Store parsed report in DB ──
+  console.log(`[manual-pipeline] Step 5: Storing structured report`);
+  const parsedReportRecord = await storage.createParsedReport({
+    scanId,
+    reportJson: parsedReport as any,
+    profileJson: parsedReport.profile as any,
+    issueFlagsJson: parsedReport.issueFlags as any,
+    summaryJson: parsedReport.summary as any,
+    sourceFileName: "manual-entry",
+    sourceFileType: "manual",
+    parserVersion: "2.0.0-manual",
+    tradelineCount: tradelines.length,
+    issueFlagCount: parsedReport.issueFlags.length,
+  });
+
+  // ── Step 6: Store per-tradeline evidence ──
+  for (const tl of tradelines) {
+    const tradelineFlags = parsedReport.issueFlags.filter(f =>
+      f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
+    );
+    await storage.createTradelineEvidence({
+      parsedReportId: parsedReportRecord.id,
+      creditorName: tl.creditorName,
+      accountNumberMasked: tl.accountNumberMasked || null,
+      tradelineJson: tl as any,
+      evidenceText: tl.evidenceText || "",
+      bureaus: tl.bureaus.join(", "),
+      issueFlagsJson: tradelineFlags as any,
+    });
+  }
+
+  // ── Step 7: Run AI violation detection on each account ──
+  let totalViolations = 0;
+  const clientState = scan.clientState || null;
+
+  for (const acct of negAccounts) {
+    // Enrich rawDetails with issue flag info
+    const tl = tradelines.find(t => t.creditorName === acct.creditor);
+    const tradelineFlags = tl ? parsedReport.issueFlags.filter(f =>
+      f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
+    ) : [];
+
+    if (tradelineFlags.length > 0) {
+      const flagLines = tradelineFlags.map(f =>
+        `[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`
+      ).join("\n");
+      const enrichedRawDetails = (acct.rawDetails || "") + `\n\nRule-Based Flags:\n${flagLines}`;
+      await storage.updateNegativeAccount(acct.id, { rawDetails: enrichedRawDetails });
+      // Re-fetch the updated account for violation detection
+      const updated = await storage.getNegativeAccount(acct.id);
+      if (updated) {
+        await storage.clearViolationsByAccount(acct.id);
+        try {
+          const detected = await detectViolations(updated, clientState);
+          for (const v of detected) {
+            await storage.createViolation({
+              negativeAccountId: acct.id,
+              violationType: v.violationType,
+              severity: v.severity,
+              explanation: v.explanation,
+              fcraStatute: v.fcraStatute,
+              evidence: v.evidence || null,
+              matchedRule: v.matchedRule || null,
+              category: v.category || "FCRA_REPORTING",
+              evidenceRequired: v.evidenceRequired || null,
+              evidenceProvided: v.evidenceProvided || false,
+              evidenceNotes: v.evidenceNotes || null,
+              confidence: v.confidence || "possible",
+              croReminder: v.croReminder || null,
+            });
+            totalViolations++;
+          }
+          await storage.updateWorkflowStep(acct.id, "scanned");
+        } catch (err) {
+          console.error(`[manual-pipeline] Violation scan failed for ${acct.creditor}:`, err);
+        }
+      }
+    } else {
+      // No flags but still run AI analysis
+      await storage.clearViolationsByAccount(acct.id);
+      try {
+        const detected = await detectViolations(acct, clientState);
+        for (const v of detected) {
+          await storage.createViolation({
+            negativeAccountId: acct.id,
+            violationType: v.violationType,
+            severity: v.severity,
+            explanation: v.explanation,
+            fcraStatute: v.fcraStatute,
+            evidence: v.evidence || null,
+            matchedRule: v.matchedRule || null,
+            category: v.category || "FCRA_REPORTING",
+            evidenceRequired: v.evidenceRequired || null,
+            evidenceProvided: v.evidenceProvided || false,
+            evidenceNotes: v.evidenceNotes || null,
+            confidence: v.confidence || "possible",
+            croReminder: v.croReminder || null,
+          });
+          totalViolations++;
+        }
+        await storage.updateWorkflowStep(acct.id, "scanned");
+      } catch (err) {
+        console.error(`[manual-pipeline] Violation scan failed for ${acct.creditor}:`, err);
+      }
+    }
+  }
+
+  // Update scan status
+  await storage.updateScanStatus(scanId, "completed" as any);
+  await storage.updateScanStep(scanId, 4);
+
+  console.log(`[manual-pipeline] Complete: ${tradelines.length} tradelines, ${parsedReport.issueFlags.length} flags, ${totalViolations} violations`);
+
+  return {
+    scanId,
+    parsedReportId: parsedReportRecord.id,
+    consumerName: scan.consumerName,
+    parsedReport,
+    accountsCreated: tradelines.length,
+    violationsFound: totalViolations,
+    issueFlagsDetected: parsedReport.issueFlags.length,
+  };
+}
+
 function mapAccountType(type: string, status: string): string {
   if (type === "collection" || status === "collection") return "debt_collection";
   if (status === "chargeoff") return "charge_off";
   if (status === "repossession") return "repossession";
   if (status === "derogatory" || status === "late") return "charge_off";
   return "debt_collection";
+}
+
+function mapManualAccountType(type: string): AccountType {
+  if (type === "debt_collection") return "collection";
+  if (type === "charge_off") return "revolving"; // charge-offs are typically revolving/installment
+  if (type === "repossession") return "auto_loan";
+  return "other";
+}
+
+function mapManualStatus(typeOrStatus: string | null): AccountStatus {
+  if (!typeOrStatus) return "other";
+  const s = typeOrStatus.toLowerCase();
+  if (s.includes("collection") || s.includes("debt_collection")) return "collection";
+  if (s.includes("charge") || s.includes("charge_off")) return "chargeoff";
+  if (s.includes("reposs")) return "repossession";
+  if (s.includes("current")) return "current";
+  if (s.includes("late")) return "late";
+  if (s.includes("paid")) return "paid";
+  if (s.includes("settled")) return "settled";
+  if (s.includes("closed")) return "closed";
+  return "derogatory";
 }

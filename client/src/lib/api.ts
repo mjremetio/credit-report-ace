@@ -194,6 +194,31 @@ export async function uploadScanFile(file: File) {
   }
 }
 
+// ========== MANUAL ANALYSIS PIPELINE API ==========
+
+export async function runManualAnalysisPipeline(scanId: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 600_000); // 10 min timeout
+  try {
+    const res = await fetch(`/api/scans/${scanId}/analyze`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Failed to run analysis pipeline");
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Analysis pipeline timed out. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ========== REVIEW WORKFLOW API ==========
 
 export async function reviewViolation(violationId: number, data: {

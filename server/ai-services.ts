@@ -120,12 +120,16 @@ COMMON DEBT COLLECTOR VIOLATIONS TO CHECK:
    Look for: 7+ calls in 7 days (CFPB Reg F threshold), 3+ calls same day, back-to-back calls, repeated calls without response, aggressive/threatening tone or language. Call log screenshots can help support this type of violation.
    Evidence needed: Call logs, call history screenshots, recordings.
 
-CRO REMINDER — For EVERY debt collector account, the CRO analyst MUST:
-• Always ask about ALL communication activity (calls, letters, texts, emails, voicemails)
-• Always request COPIES of ALL letters, texts, emails, and voicemails received
-• Always ask about recorded calls — these are critical evidence
-• Strong violations REQUIRE supporting documentation before escalation
-• If documentation supports the violation, escalate for review immediately
+## CRO REMINDER — MANDATORY for EVERY debt collector account:
+When reviewing ANY debt collector account, the CRO analyst MUST follow this checklist:
+• Always ask about ALL communication activity — calls, letters, texts, emails, voicemails
+• Always request COPIES of ALL letters, texts, emails, and voicemails received from the collector
+• Always ask about recorded calls — recorded calls are CRITICAL evidence for violations
+• Strong violations REQUIRE supporting documentation before they can be escalated
+• If documentation supports the violation, ESCALATE for review immediately
+• Include a specific "cro_reminder" in EVERY violation returned for debt collector accounts
+
+For EVERY detected violation on a debt collector account, you MUST include a cro_reminder field that tells the CRO exactly what to ask the client and what documentation to request.
 
 ## SEVERITY:
 - "critical": Clear statutory violation, strong litigation potential
@@ -156,7 +160,17 @@ Return ONLY valid JSON:
   ]
 }
 
-Be thorough but precise. Only flag genuine potential issues. If the account details are sparse, focus on what can be determined from the available information. Always check for the most common issues: balance accuracy, date consistency, proper creditor identification, and bureau consistency. For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector conduct violations, use the specific category name.`;
+Be thorough but precise. Only flag genuine potential issues. If the account details are sparse, focus on what can be determined from the available information.
+
+ANALYSIS CHECKLIST — For EVERY account, always check:
+1. Balance accuracy (paid/settled with balance, cross-bureau mismatch, post-bankruptcy balance)
+2. Date consistency (DOFD matches payment history, obsolete reporting >7 years, re-aging)
+3. Proper creditor identification (original creditor listed on collections)
+4. Bureau consistency (status, balance, credit limit differences across TransUnion/Experian/Equifax)
+5. Account type accuracy (collection misclassified as revolving, authorized user as primary)
+6. Payment history alignment (grid matches reported status)
+
+For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector conduct violations, use the specific category name (DEBT_COLLECTOR_DISCLOSURE, CA_LICENSE_MISSING, CEASE_CONTACT_VIOLATION, INCONVENIENT_CONTACT, THIRD_PARTY_DISCLOSURE, HARASSMENT_EXCESSIVE_CALLS).`;
 
 export async function detectViolations(account: NegativeAccount, clientState?: string | null): Promise<DetectedViolation[]> {
   const accountDetails = buildAccountDescription(account, clientState);

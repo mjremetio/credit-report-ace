@@ -5,11 +5,11 @@ import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
   Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
-  MapPin
+  MapPin, Download, ClipboardCheck, Activity
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
-  deleteNegativeAccount, scanAccountForViolations
+  deleteNegativeAccount, scanAccountForViolations, runManualAnalysisPipeline
 } from "@/lib/api";
 
 const STEPS = [
@@ -199,10 +199,10 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
 
       <div className="space-y-4 mb-10">
         {[
-          { step: 1, title: "Start Your Scan", desc: "You're here. Ready to begin." },
-          { step: 2, title: "Add Negative Accounts", desc: "Paste or enter the negative items from your credit reports." },
-          { step: 3, title: "Classify Each Account", desc: "Categorize accounts as Debt Collection, Charge-Off, or Repossession." },
-          { step: 4, title: "Follow Next Steps", desc: "Scan for violations and see clear next actions for each account." },
+          { step: 1, title: "Manual Data Entry", desc: "You're here. Enter client information and begin." },
+          { step: 2, title: "Add Negative Accounts", desc: "Enter the negative items from the credit report with all details." },
+          { step: 3, title: "Classify Each Account", desc: "Add account details (balance, dates, bureaus, status)." },
+          { step: 4, title: "Convert to Structured JSON & AI Analysis", desc: "Convert entries into structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), run AI violation analysis, then proceed to paralegal review and export." },
         ].map((item) => (
           <div key={item.step} className={`flex items-start gap-4 p-4 rounded-lg border ${item.step === 1 ? "border-primary/30 bg-primary/5" : "border-border bg-card"}`}>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-mono flex-shrink-0 ${item.step === 1 ? "bg-primary text-black" : "bg-secondary text-muted-foreground"}`}>
@@ -530,6 +530,8 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanAllRunning, setScanAllRunning] = useState(false);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any>(null);
 
   const scanMutation = useMutation({
     mutationFn: scanAccountForViolations,
@@ -569,6 +571,20 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
     setScanAllRunning(false);
   };
 
+  // Full pipeline: Convert manual entries → Structured JSON → AI Analysis
+  const handleRunPipeline = async () => {
+    setScanError(null);
+    setPipelineRunning(true);
+    try {
+      const result = await runManualAnalysisPipeline(scanId);
+      setPipelineResult(result);
+      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
+    } catch (err: any) {
+      setScanError(err.message || "Pipeline failed. Please try again.");
+    }
+    setPipelineRunning(false);
+  };
+
   const completeScan = () => {
     updateScan(scanId, { status: "completed" }).then(() => {
       queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
@@ -589,25 +605,104 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+      {/* Manual Workflow Progress */}
+      <div className="mb-6 bg-card border border-border rounded-xl p-5">
+        <h4 className="font-display text-white text-sm mb-3">Manual Workflow</h4>
+        <div className="space-y-2 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+            <span className="text-muted-foreground">Manual data entry — {negAccounts.length} account(s) added</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {(allScanned || pipelineResult) ? (
+              <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+            ) : pipelineRunning ? (
+              <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+            ) : (
+              <Activity className="w-4 h-4 text-primary flex-shrink-0" />
+            )}
+            <span className={allScanned || pipelineResult ? "text-muted-foreground" : "text-primary"}>
+              Convert into Structured JSON & AI violation analysis
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
+            <span className="text-muted-foreground/50">Paralegal manual review — Edit analysis reports</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
+            <span className="text-muted-foreground/50">Export (after review & approval)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Pipeline Result Banner */}
+      {pipelineResult && (
+        <div className="mb-6 bg-green-500/5 border border-green-500/30 rounded-xl p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <CheckCircle2 className="w-5 h-5 text-green-400" />
+            <h4 className="font-display text-white text-sm">Full Analysis Pipeline Complete</h4>
+          </div>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-display text-white">{pipelineResult.accountsCreated}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Tradelines</div>
+            </div>
+            <div>
+              <div className="text-2xl font-display text-white">{pipelineResult.violationsFound}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Violations</div>
+            </div>
+            <div>
+              <div className="text-2xl font-display text-white">{pipelineResult.issueFlagsDetected}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Issue Flags</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <h2 className="font-display text-2xl text-white mb-2">Next Steps</h2>
+          <h2 className="font-display text-2xl text-white mb-2">Analyze & Review</h2>
           <p className="text-muted-foreground font-mono text-sm">
-            Scan each account for potential FCRA & FDCPA violations and review the results.
+            Convert manual entries to structured JSON and run AI violation analysis, or scan individual accounts.
           </p>
         </div>
-        {unscannedCount > 0 && (
-          <button
-            data-testid="button-scan-all"
-            onClick={handleScanAll}
-            disabled={scanAllRunning}
-            className="px-5 py-2.5 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm flex-shrink-0"
-          >
-            {scanAllRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            {scanAllRunning ? "Scanning All..." : `Scan All (${unscannedCount})`}
-          </button>
-        )}
+        <div className="flex gap-2 flex-shrink-0">
+          {!pipelineResult && (
+            <button
+              data-testid="button-run-pipeline"
+              onClick={handleRunPipeline}
+              disabled={pipelineRunning || negAccounts.length === 0}
+              className="px-5 py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+            >
+              {pipelineRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              {pipelineRunning ? "Running Pipeline..." : "Run Full Analysis"}
+            </button>
+          )}
+          {unscannedCount > 0 && !pipelineRunning && (
+            <button
+              data-testid="button-scan-all"
+              onClick={handleScanAll}
+              disabled={scanAllRunning}
+              className="px-5 py-2.5 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+            >
+              {scanAllRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              {scanAllRunning ? "Scanning..." : `Scan Individual (${unscannedCount})`}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Pipeline running indicator */}
+      {pipelineRunning && (
+        <div className="mb-6 bg-primary/5 border border-primary/30 rounded-xl p-6 text-center">
+          <Activity className="w-8 h-8 text-primary animate-pulse mx-auto mb-3" />
+          <h4 className="font-display text-white mb-2">Running Full Analysis Pipeline...</h4>
+          <p className="text-xs font-mono text-muted-foreground">
+            Converting {negAccounts.length} account(s) to structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), computing issue flags, and running AI violation analysis...
+          </p>
+        </div>
+      )}
 
       {scanError && (
         <div data-testid="scan-error" className="mb-6 bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
@@ -752,6 +847,15 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="flex gap-3">
+          {(allScanned || pipelineResult) && (
+            <button
+              data-testid="button-begin-review"
+              onClick={() => navigate(`/review/${scanId}`)}
+              className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+            >
+              <ClipboardCheck className="w-4 h-4" /> Paralegal Review
+            </button>
+          )}
           <button
             data-testid="button-complete-scan"
             onClick={completeScan}
@@ -759,15 +863,6 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           >
             <CheckCircle2 className="w-4 h-4" /> Mark Complete
           </button>
-          {allScanned && (
-            <button
-              data-testid="button-begin-review"
-              onClick={() => navigate(`/review/${scanId}`)}
-              className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
-            >
-              <Eye className="w-4 h-4" /> Begin Review
-            </button>
-          )}
           <button
             data-testid="button-view-profile"
             onClick={() => navigate("/profile")}
