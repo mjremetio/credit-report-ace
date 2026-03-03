@@ -368,6 +368,14 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
     }
   }
 
+  // Strip evidenceText from tradelines — it's the full batch text duplicated
+  // per tradeline and massively bloats the API response. The frontend display
+  // doesn't use it; the raw evidence is preserved in the DB (parsedReport.reportJson).
+  const stripHeavyFields = (tl: Tradeline): Tradeline => ({
+    ...tl,
+    evidenceText: "",
+  });
+
   return {
     creditScores: {
       TransUnion: scoreMap.TransUnion,
@@ -388,10 +396,10 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
       totalMonthlyPayment,
       perBureau: report.bureauSummaries,
     },
-    accountHistory,
-    publicInformation: report.publicRecords,
+    accountHistory: accountHistory.map(stripHeavyFields),
+    publicInformation: report.publicRecords.map(pr => ({ ...pr, evidenceText: "" })),
     inquiries: report.inquiries,
-    collections,
+    collections: collections.map(stripHeavyFields),
     creditorContacts: Array.from(contactMap.values()),
     metadata: {
       parsedAt: report.metadata.parsedAt,

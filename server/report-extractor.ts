@@ -247,7 +247,7 @@ async function llmExtractImage<T>(systemPrompt: string, userPrompt: string, imag
   return JSON.parse(raw) as T;
 }
 
-// ── Pass 1: Section-by-section extraction ──────────────────────────
+// ── Pass 1: Section-by-section extraction (parallel) ───────────────
 
 interface RawExtraction {
   profile?: LLMProfileExtraction;
@@ -256,6 +256,111 @@ interface RawExtraction {
   publicRecords: Array<LLMPublicRecordExtraction & { evidenceText: string }>;
   inquiries: LLMInquiryExtraction[];
   consumerStatements: LLMConsumerStatementExtraction[];
+}
+
+/** Process a single batch through the appropriate LLM extraction prompt */
+async function extractSingleBatch(batch: ReportSection[]): Promise<RawExtraction> {
+  const batchText = batch.map(s => `[${s.type.toUpperCase()}: ${s.label}]\n${s.text}`).join("\n\n===\n\n");
+  const primaryType = batch[0].type;
+
+  const result: RawExtraction = {
+    bureauSummaries: [],
+    tradelines: [],
+    publicRecords: [],
+    inquiries: [],
+    consumerStatements: [],
+  };
+
+  if (primaryType === "personal_info") {
+    const data = await llmExtract<{ name?: string; aliases?: string[]; dateOfBirth?: string; ssn?: string; reportDate?: string; scores?: any[]; addresses?: any[]; employers?: any[] }>(
+      EXTRACTION_SYSTEM_PROMPT,
+      PROFILE_EXTRACTION_PROMPT,
+      batchText,
+    );
+    if (data.name) {
+      result.profile = { ...data, name: data.name } as LLMProfileExtraction;
+    }
+  } else if (primaryType === "bureau_summary") {
+    const data = await llmExtract<{ bureauSummaries?: LLMBureauSummaryExtraction[] }>(
+      EXTRACTION_SYSTEM_PROMPT,
+      SUMMARY_EXTRACTION_PROMPT,
+      batchText,
+    );
+    if (data.bureauSummaries) {
+      result.bureauSummaries.push(...data.bureauSummaries);
+    }
+  } else if (primaryType === "public_records") {
+    const data = await llmExtract<{ publicRecords?: LLMPublicRecordExtraction[] }>(
+      EXTRACTION_SYSTEM_PROMPT,
+      PUBLIC_RECORDS_EXTRACTION_PROMPT,
+      batchText,
+    );
+    if (data.publicRecords) {
+      result.publicRecords.push(...data.publicRecords.map(r => ({
+        ...r,
+        evidenceText: batchText,
+      })));
+    }
+  } else if (primaryType === "inquiries") {
+    const data = await llmExtract<{ inquiries?: LLMInquiryExtraction[] }>(
+      EXTRACTION_SYSTEM_PROMPT,
+      INQUIRIES_EXTRACTION_PROMPT,
+      batchText,
+    );
+    if (data.inquiries) {
+      result.inquiries.push(...data.inquiries);
+    }
+  } else if (primaryType === "consumer_statement") {
+    const data = await llmExtract<{ consumerStatements?: LLMConsumerStatementExtraction[] }>(
+      EXTRACTION_SYSTEM_PROMPT,
+      CONSUMER_STATEMENT_EXTRACTION_PROMPT,
+      batchText,
+    );
+    if (data.consumerStatements) {
+      result.consumerStatements.push(...data.consumerStatements);
+    }
+  } else {
+    // Default: treat as tradeline extraction (most sections contain accounts)
+    const data = await llmExtract<{
+      tradelines?: LLMTradelineExtraction[];
+      profile?: LLMProfileExtraction;
+      publicRecords?: LLMPublicRecordExtraction[];
+      inquiries?: LLMInquiryExtraction[];
+      bureauSummaries?: LLMBureauSummaryExtraction[];
+      consumerStatements?: LLMConsumerStatementExtraction[];
+    }>(
+      EXTRACTION_SYSTEM_PROMPT,
+      TRADELINE_EXTRACTION_PROMPT,
+      batchText,
+    );
+
+    if (data.tradelines) {
+      result.tradelines.push(...data.tradelines.map(t => ({
+        ...t,
+        evidenceText: batchText,
+      })));
+    }
+    if (data.profile) {
+      result.profile = data.profile;
+    }
+    if (data.publicRecords) {
+      result.publicRecords.push(...data.publicRecords.map(r => ({
+        ...r,
+        evidenceText: batchText,
+      })));
+    }
+    if (data.inquiries) {
+      result.inquiries.push(...data.inquiries);
+    }
+    if (data.bureauSummaries) {
+      result.bureauSummaries.push(...data.bureauSummaries);
+    }
+    if (data.consumerStatements) {
+      result.consumerStatements.push(...data.consumerStatements);
+    }
+  }
+
+  return result;
 }
 
 export async function extractPass1(sections: ReportSection[], imageBuffer?: Buffer, imageMimeType?: string): Promise<RawExtraction> {
@@ -283,6 +388,15 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
     };
   }
 
+  // Batch sections by type, then process all batches in parallel
+  const batches = batchSections(sections);
+  console.log(`[extractor] Processing ${batches.length} batch(es) in parallel`);
+
+  const batchResults = await Promise.allSettled(
+    batches.map(batch => extractSingleBatch(batch))
+  );
+
+  // Merge all batch results
   const raw: RawExtraction = {
     bureauSummaries: [],
     tradelines: [],
@@ -291,107 +405,18 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
     consumerStatements: [],
   };
 
-  // Batch small sections together, process large ones individually
-  const batches = batchSections(sections);
-
-  for (const batch of batches) {
-    const batchText = batch.map(s => `[${s.type.toUpperCase()}: ${s.label}]\n${s.text}`).join("\n\n===\n\n");
-    const primaryType = batch[0].type;
-
-    try {
-      if (primaryType === "personal_info") {
-        const result = await llmExtract<{ name?: string; aliases?: string[]; dateOfBirth?: string; ssn?: string; reportDate?: string; scores?: any[]; addresses?: any[]; employers?: any[] }>(
-          EXTRACTION_SYSTEM_PROMPT,
-          PROFILE_EXTRACTION_PROMPT,
-          batchText,
-        );
-        if (result.name) {
-          raw.profile = { ...result, name: result.name } as LLMProfileExtraction;
-        }
-      } else if (primaryType === "bureau_summary") {
-        const result = await llmExtract<{ bureauSummaries?: LLMBureauSummaryExtraction[] }>(
-          EXTRACTION_SYSTEM_PROMPT,
-          SUMMARY_EXTRACTION_PROMPT,
-          batchText,
-        );
-        if (result.bureauSummaries) {
-          raw.bureauSummaries.push(...result.bureauSummaries);
-        }
-      } else if (primaryType === "public_records") {
-        const result = await llmExtract<{ publicRecords?: LLMPublicRecordExtraction[] }>(
-          EXTRACTION_SYSTEM_PROMPT,
-          PUBLIC_RECORDS_EXTRACTION_PROMPT,
-          batchText,
-        );
-        if (result.publicRecords) {
-          raw.publicRecords.push(...result.publicRecords.map(r => ({
-            ...r,
-            evidenceText: batchText,
-          })));
-        }
-      } else if (primaryType === "inquiries") {
-        const result = await llmExtract<{ inquiries?: LLMInquiryExtraction[] }>(
-          EXTRACTION_SYSTEM_PROMPT,
-          INQUIRIES_EXTRACTION_PROMPT,
-          batchText,
-        );
-        if (result.inquiries) {
-          raw.inquiries.push(...result.inquiries);
-        }
-      } else if (primaryType === "consumer_statement") {
-        const result = await llmExtract<{ consumerStatements?: LLMConsumerStatementExtraction[] }>(
-          EXTRACTION_SYSTEM_PROMPT,
-          CONSUMER_STATEMENT_EXTRACTION_PROMPT,
-          batchText,
-        );
-        if (result.consumerStatements) {
-          raw.consumerStatements.push(...result.consumerStatements);
-        }
-      } else {
-        // Default: treat as tradeline extraction (most sections contain accounts)
-        const result = await llmExtract<{
-          tradelines?: LLMTradelineExtraction[];
-          // Also accept if profile/inquiries/public_records/consumer_statements appear in mixed sections
-          profile?: LLMProfileExtraction;
-          publicRecords?: LLMPublicRecordExtraction[];
-          inquiries?: LLMInquiryExtraction[];
-          bureauSummaries?: LLMBureauSummaryExtraction[];
-          consumerStatements?: LLMConsumerStatementExtraction[];
-        }>(
-          EXTRACTION_SYSTEM_PROMPT,
-          TRADELINE_EXTRACTION_PROMPT,
-          batchText,
-        );
-
-        if (result.tradelines) {
-          raw.tradelines.push(...result.tradelines.map(t => ({
-            ...t,
-            evidenceText: batchText,
-          })));
-        }
-        if (result.profile && !raw.profile) {
-          raw.profile = result.profile;
-        }
-        if (result.publicRecords) {
-          raw.publicRecords.push(...result.publicRecords.map(r => ({
-            ...r,
-            evidenceText: batchText,
-          })));
-        }
-        if (result.inquiries) {
-          raw.inquiries.push(...result.inquiries);
-        }
-        if (result.bureauSummaries) {
-          raw.bureauSummaries.push(...result.bureauSummaries);
-        }
-        if (result.consumerStatements) {
-          raw.consumerStatements.push(...result.consumerStatements);
-        }
-      }
-    } catch (err: any) {
-      console.error(`[extractor] Pass 1 failed for batch (${primaryType}):`, err?.message || err);
-      // Continue with other batches
+  for (const settled of batchResults) {
+    if (settled.status === "rejected") {
+      console.error(`[extractor] Batch failed:`, settled.reason?.message || settled.reason);
+      continue;
     }
+    const data = settled.value;
+    if (data.profile && !raw.profile) raw.profile = data.profile;
+    raw.bureauSummaries.push(...data.bureauSummaries);
+    raw.tradelines.push(...data.tradelines);
+    raw.publicRecords.push(...data.publicRecords);
+    raw.inquiries.push(...data.inquiries);
+    raw.consumerStatements.push(...data.consumerStatements);
   }
 
   return raw;

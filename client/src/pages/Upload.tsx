@@ -100,6 +100,7 @@ export default function Upload() {
       addLog("STRUCTURING COMPLETE — Review organized data below.");
       setStructureResult(data);
       setOrganizedReport(data.organizedReport || null);
+      autoExpandSections(data.organizedReport);
       setPhase("structured");
     },
     onError: (err: Error) => {
@@ -126,6 +127,7 @@ export default function Upload() {
       addLog("STRUCTURING COMPLETE — Review organized data below.");
       setStructureResult(data);
       setOrganizedReport(data.organizedReport || null);
+      autoExpandSections(data.organizedReport);
       setPhase("structured");
     },
     onError: (err: Error) => {
@@ -229,6 +231,21 @@ export default function Upload() {
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Auto-expand sections that have data so the user sees extracted content immediately
+  const autoExpandSections = (report: any) => {
+    if (!report) return;
+    setExpandedSections({
+      personalInfo: true,
+      scores: true,
+      accountSummary: true,
+      tradelines: (report.accountHistory?.length || 0) > 0,
+      collections: (report.collections?.length || 0) > 0,
+      publicRecords: (report.publicInformation?.length || 0) > 0,
+      inquiries: (report.inquiries?.length || 0) > 0,
+      consumerStatements: (report.consumerStatements?.length || 0) > 0,
+    });
   };
 
   return (

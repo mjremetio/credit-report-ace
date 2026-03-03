@@ -152,7 +152,11 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 }
 
 export function cleanRawText(content: string): string {
-  return content.replace(/\s+/g, " ").trim();
+  return content
+    .replace(/\r\n/g, "\n")         // normalize line endings
+    .replace(/[ \t]+/g, " ")        // collapse horizontal whitespace only (preserve newlines)
+    .replace(/\n{3,}/g, "\n\n")     // limit consecutive blank lines to one
+    .trim();
 }
 
 // ── Section splitting ──────────────────────────────────────────────
@@ -426,7 +430,9 @@ export async function parseReportFile(
 
 /**
  * Group sections into batches for LLM extraction.
- * Small sections get grouped together; large tradeline blocks stay solo.
+ * IMPORTANT: Only batch sections of the SAME type together.
+ * Mixing types causes data loss because only the first section's type
+ * determines which extraction prompt is used.
  */
 export function batchSections(
   sections: ReportSection[],
@@ -435,15 +441,22 @@ export function batchSections(
   const batches: ReportSection[][] = [];
   let currentBatch: ReportSection[] = [];
   let currentSize = 0;
+  let currentType: SectionType | null = null;
 
   for (const section of sections) {
-    if (currentSize + section.text.length > maxCharsPerBatch && currentBatch.length > 0) {
+    // Start a new batch when type changes OR size limit exceeded
+    const typeChanged = currentType !== null && section.type !== currentType;
+    const sizeExceeded = currentSize + section.text.length > maxCharsPerBatch && currentBatch.length > 0;
+
+    if (typeChanged || sizeExceeded) {
       batches.push(currentBatch);
       currentBatch = [];
       currentSize = 0;
     }
+
     currentBatch.push(section);
     currentSize += section.text.length;
+    currentType = section.type;
   }
 
   if (currentBatch.length > 0) {
