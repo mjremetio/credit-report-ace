@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   UploadCloud, Activity, Loader2, CheckCircle2, AlertTriangle, FileText,
-  Edit3, ArrowRight, RotateCcw, Eye
+  Edit3, ArrowRight, RotateCcw, Eye, Shield, ClipboardCheck, Download
 } from "lucide-react";
 import { extractFileText, analyzeExtractedText, uploadScanFile } from "@/lib/api";
 
@@ -145,8 +145,6 @@ export default function Upload() {
     setIsEdited(false);
   };
 
-  const isProcessing = phase === "extracting" || phase === "analyzing";
-
   return (
     <div className="h-full">
       <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6">
@@ -196,13 +194,15 @@ export default function Upload() {
             </div>
 
             <div className="mt-6 bg-card border border-border rounded-xl p-5">
-              <h4 className="font-display text-white text-sm mb-3">How it works</h4>
+              <h4 className="font-display text-white text-sm mb-3">Upload Workflow</h4>
               <div className="space-y-3">
                 {[
-                  { step: 1, text: "Upload your credit report file (HTML, PDF, TXT, or image)" },
-                  { step: 2, text: "Review extracted raw data — edit any details if needed" },
-                  { step: 3, text: "AI analyzes the data for FCRA violations" },
-                  { step: 4, text: "Review results in the guided workflow" },
+                  { step: 1, text: "Upload file — Extract raw text from credit report" },
+                  { step: 2, text: "Review & edit extracted text for accuracy" },
+                  { step: 3, text: "Convert into Structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement)" },
+                  { step: 4, text: "AI analysis for possible FCRA/FDCPA violations" },
+                  { step: 5, text: "Paralegal manual review — Edit analysis reports" },
+                  { step: 6, text: "Export approved report (PDF/CSV)" },
                 ].map((item) => (
                   <div key={item.step} className="flex items-center gap-3">
                     <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-mono flex-shrink-0">
@@ -342,10 +342,10 @@ export default function Upload() {
                 <Activity className="w-8 h-8 animate-pulse" />
               </div>
               <h3 className="font-display text-xl font-medium mb-2 text-white">
-                AI Analyzing Report...
+                Processing Report...
               </h3>
               <p className="text-muted-foreground max-w-md font-mono text-sm">
-                Extracting accounts, detecting FCRA violations, and generating analysis...
+                Converting to structured JSON, running AI violation analysis (scores, personal info, bureau summary, tradelines, public records, inquiries)...
               </p>
               <div className="w-full max-w-md mt-8">
                 <div className="flex justify-between text-xs font-mono mb-2">
@@ -378,15 +378,18 @@ export default function Upload() {
               <p className="text-muted-foreground font-mono text-sm mb-1">
                 Consumer: <span className="text-white">{result.consumerName}</span>
               </p>
+              <p className="text-xs font-mono text-muted-foreground mt-2">
+                Structured JSON created with scores, personal info, bureau summary, tradelines, public records, inquiries, and consumer statements
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="bg-card border border-border rounded-xl p-5">
                 <div className="p-2 rounded-lg bg-primary/10 inline-block mb-3">
                   <FileText className="w-5 h-5 text-primary" />
                 </div>
                 <div className="text-3xl font-display text-white">{result.accountsCreated}</div>
-                <div className="text-xs font-mono text-muted-foreground mt-1">Accounts Extracted</div>
+                <div className="text-xs font-mono text-muted-foreground mt-1">Tradelines Extracted</div>
               </div>
               <div className="bg-card border border-border rounded-xl p-5">
                 <div className="p-2 rounded-lg bg-destructive/10 inline-block mb-3">
@@ -395,15 +398,57 @@ export default function Upload() {
                 <div className="text-3xl font-display text-white">{result.violationsFound}</div>
                 <div className="text-xs font-mono text-muted-foreground mt-1">Violations Detected</div>
               </div>
+              <div className="bg-card border border-border rounded-xl p-5">
+                <div className="p-2 rounded-lg bg-yellow-500/10 inline-block mb-3">
+                  <Shield className="w-5 h-5 text-yellow-400" />
+                </div>
+                <div className="text-3xl font-display text-white">{result.issueFlagsDetected || 0}</div>
+                <div className="text-xs font-mono text-muted-foreground mt-1">Issue Flags</div>
+              </div>
+            </div>
+
+            {/* Next Steps in Workflow */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h4 className="font-display text-white text-sm mb-3">Next Steps</h4>
+              <div className="space-y-2 text-xs font-mono text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                  <span>File uploaded & text extracted</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                  <span>Structured JSON created (TransUnion, Experian, Equifax)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                  <span>AI violation analysis complete</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4 text-primary flex-shrink-0" />
+                  <span className="text-primary">Paralegal manual review — Edit analysis reports</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
+                  <span>Export (after review & approval)</span>
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-3">
               <button
-                data-testid="button-view-scan"
-                onClick={() => navigate(`/scan/${result.scanId}`)}
+                data-testid="button-view-review"
+                onClick={() => navigate(`/review/${result.scanId}`)}
                 className="flex-1 px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
               >
-                Review in Workflow
+                <ClipboardCheck className="w-4 h-4" />
+                Paralegal Review
+              </button>
+              <button
+                data-testid="button-view-scan"
+                onClick={() => navigate(`/scan/${result.scanId}`)}
+                className="px-6 py-3 bg-secondary border border-border text-white rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2"
+              >
+                View Scan Details
               </button>
               <button
                 data-testid="button-upload-another"

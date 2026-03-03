@@ -2,7 +2,7 @@ import { useLocation } from "wouter";
 import { BrainCircuit, UploadCloud, ClipboardList, Eye, Activity } from "lucide-react";
 
 const NAV_ITEMS = [
-  { path: "/upload", label: "Upload", icon: UploadCloud, testId: "nav-upload" },
+  { path: "/upload", label: "Upload Workflow", icon: UploadCloud, testId: "nav-upload" },
   { path: "/", label: "Manual Workflow", icon: ClipboardList, testId: "nav-manual" },
   { path: "/profile", label: "Profile Clarity", icon: Eye, testId: "nav-profile" },
 ];

@@ -3,9 +3,8 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import { z } from "zod";
 import { storage } from "./storage";
-import { analyzeReport } from "./analyzer";
 import { detectViolations } from "./ai-services";
-import { runReportPipeline, organizeReport } from "./report-pipeline";
+import { runReportPipeline, organizeReport, runManualEntryPipeline } from "./report-pipeline";
 import { parseReportFile } from "./report-parser";
 
 const createScanSchema = z.object({
@@ -411,6 +410,30 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error scanning account:", error);
       res.status(500).json({ error: "Failed to scan account for violations. Please try again." });
+    }
+  });
+
+  // POST /api/scans/:scanId/analyze — Run full manual entry pipeline
+  // Manual Workflow: Manual Data Entry → Structured JSON → AI Analysis → Review → Export
+  app.post("/api/scans/:scanId/analyze", async (req, res) => {
+    try {
+      const scanId = parseInt(req.params.scanId);
+      const scan = await storage.getScan(scanId);
+      if (!scan) return res.status(404).json({ error: "Scan not found" });
+
+      const result = await runManualEntryPipeline(scanId);
+
+      res.json({
+        scanId: result.scanId,
+        parsedReportId: result.parsedReportId,
+        consumerName: result.consumerName,
+        accountsCreated: result.accountsCreated,
+        violationsFound: result.violationsFound,
+        issueFlagsDetected: result.issueFlagsDetected,
+      });
+    } catch (error: any) {
+      console.error("Error running manual analysis pipeline:", error);
+      res.status(500).json({ error: error?.message || "Failed to run analysis pipeline" });
     }
   });
 
