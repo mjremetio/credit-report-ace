@@ -4,11 +4,12 @@ import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   UploadCloud, Activity, Loader2, CheckCircle2, AlertTriangle, FileText,
-  Edit3, ArrowRight, RotateCcw, Eye
+  Edit3, ArrowRight, RotateCcw, Eye, Columns3, FileCode
 } from "lucide-react";
 import { extractFileText, analyzeExtractedText, uploadScanFile } from "@/lib/api";
 
 type UploadPhase = "idle" | "extracting" | "reviewing" | "analyzing" | "complete";
+type ViewMode = "organized" | "raw";
 
 export default function Upload() {
   const [, navigate] = useLocation();
@@ -20,9 +21,13 @@ export default function Upload() {
 
   // Review state
   const [rawText, setRawText] = useState("");
+  const [organizedText, setOrganizedText] = useState<string | null>(null);
+  const [displayText, setDisplayText] = useState(""); // What's shown in the textarea
+  const [viewMode, setViewMode] = useState<ViewMode>("organized");
   const [fileName, setFileName] = useState("");
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [isEdited, setIsEdited] = useState(false);
+  const [isTriBureau, setIsTriBureau] = useState(false);
 
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${ts()}] ${msg}`]);
 
@@ -36,7 +41,6 @@ export default function Upload() {
     },
     onSuccess: (data) => {
       if (data.isImage) {
-        // Images can't show raw text — go directly to full analysis
         addLog("IMAGE DETECTED — Skipping text preview, proceeding to AI analysis...");
         if (originalFile) {
           fullUploadMutation.mutate(originalFile);
@@ -45,9 +49,21 @@ export default function Upload() {
         addLog("TEXT EXTRACTED SUCCESSFULLY.");
         addLog(`FILE: ${data.fileName} (${data.fileType})`);
         addLog(`EXTRACTED ${data.rawText.length.toLocaleString()} characters.`);
-        addLog("READY FOR REVIEW — Edit if needed, then proceed to analysis.");
+
         setRawText(data.rawText);
+        setOrganizedText(data.organizedText);
         setFileName(data.fileName);
+        setIsTriBureau(data.isTriBureau);
+
+        if (data.isTriBureau && data.organizedText) {
+          addLog("TRI-BUREAU REPORT DETECTED — Data organized by TransUnion, Experian, Equifax.");
+          setDisplayText(data.organizedText);
+          setViewMode("organized");
+        } else {
+          setDisplayText(data.rawText);
+          setViewMode("raw");
+        }
+        addLog("READY FOR REVIEW — Edit if needed, then proceed to analysis.");
         setPhase("reviewing");
       }
     },
@@ -58,7 +74,7 @@ export default function Upload() {
     },
   });
 
-  // For images: use full upload pipeline (same as before)
+  // For images: use full upload pipeline
   const fullUploadMutation = useMutation({
     mutationFn: uploadScanFile,
     onMutate: () => {
@@ -80,7 +96,9 @@ export default function Upload() {
     },
   });
 
-  // Phase 2: Analyze the (possibly edited) text through the full pipeline
+  // Phase 2: Analyze text through the full pipeline
+  // If user hasn't edited, send the original rawText (optimal for the LLM).
+  // If user edited the organized/raw view, send whatever they see.
   const analyzeMutation = useMutation({
     mutationFn: ({ text, name }: { text: string; name: string }) =>
       analyzeExtractedText(text, name),
@@ -101,7 +119,7 @@ export default function Upload() {
     onError: (err: Error) => {
       addLog(`ERROR: ${err.message}`);
       setError(err.message);
-      setPhase("reviewing"); // Go back to review on failure
+      setPhase("reviewing");
     },
   });
 
@@ -114,7 +132,10 @@ export default function Upload() {
     setResult(null);
     setError(null);
     setRawText("");
+    setOrganizedText(null);
+    setDisplayText("");
     setIsEdited(false);
+    setIsTriBureau(false);
     extractMutation.mutate(file);
   }, [extractMutation]);
 
@@ -130,8 +151,20 @@ export default function Upload() {
     if (file) handleFile(file);
   }, [handleFile]);
 
+  const handleToggleView = (mode: ViewMode) => {
+    if (isEdited) return; // Don't switch views if user has edited (would lose edits)
+    setViewMode(mode);
+    if (mode === "organized" && organizedText) {
+      setDisplayText(organizedText);
+    } else {
+      setDisplayText(rawText);
+    }
+  };
+
   const handleProceedToAnalysis = () => {
-    analyzeMutation.mutate({ text: rawText, name: fileName });
+    // If user edited, send the display text. Otherwise send raw for best LLM results.
+    const textToAnalyze = isEdited ? displayText : rawText;
+    analyzeMutation.mutate({ text: textToAnalyze, name: fileName });
   };
 
   const handleReset = () => {
@@ -140,12 +173,13 @@ export default function Upload() {
     setResult(null);
     setError(null);
     setRawText("");
+    setOrganizedText(null);
+    setDisplayText("");
     setFileName("");
     setOriginalFile(null);
     setIsEdited(false);
+    setIsTriBureau(false);
   };
-
-  const isProcessing = phase === "extracting" || phase === "analyzing";
 
   return (
     <div className="h-full">
@@ -200,7 +234,7 @@ export default function Upload() {
               <div className="space-y-3">
                 {[
                   { step: 1, text: "Upload your credit report file (HTML, PDF, TXT, or image)" },
-                  { step: 2, text: "Review extracted raw data — edit any details if needed" },
+                  { step: 2, text: "Review extracted data organized by bureau — edit if needed" },
                   { step: 3, text: "AI analyzes the data for FCRA violations" },
                   { step: 4, text: "Review results in the guided workflow" },
                 ].map((item) => (
@@ -251,7 +285,7 @@ export default function Upload() {
           </motion.div>
         )}
 
-        {/* ── REVIEWING: Show raw text with edit capability ── */}
+        {/* ── REVIEWING: Show extracted data with bureau organization ── */}
         {phase === "reviewing" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -259,6 +293,7 @@ export default function Upload() {
             className="space-y-4"
           >
             <div className="bg-card border border-primary/30 rounded-xl p-5">
+              {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-primary/10">
@@ -267,37 +302,80 @@ export default function Upload() {
                   <div>
                     <h3 className="font-display text-lg text-white">Review Extracted Data</h3>
                     <p className="text-xs font-mono text-muted-foreground">
-                      {fileName} — {rawText.length.toLocaleString()} characters extracted
+                      {fileName} — {displayText.length.toLocaleString()} characters
                     </p>
                   </div>
                 </div>
-                {isEdited && (
-                  <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-400 bg-yellow-500/10">
-                    <Edit3 className="w-3 h-3 inline mr-1" />edited
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {isEdited && (
+                    <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-400 bg-yellow-500/10">
+                      <Edit3 className="w-3 h-3 inline mr-1" />edited
+                    </span>
+                  )}
+                  {isTriBureau && (
+                    <span className="text-xs font-mono px-2 py-1 rounded border border-blue-500/30 text-blue-400 bg-blue-500/10">
+                      <Columns3 className="w-3 h-3 inline mr-1" />Tri-Bureau
+                    </span>
+                  )}
+                </div>
               </div>
 
+              {/* View mode toggle (only for tri-bureau reports) */}
+              {isTriBureau && organizedText && (
+                <div className="flex items-center gap-1 mb-3 p-1 bg-secondary/50 rounded-lg w-fit">
+                  <button
+                    onClick={() => handleToggleView("organized")}
+                    disabled={isEdited}
+                    className={`px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center gap-1.5 ${
+                      viewMode === "organized"
+                        ? "bg-primary text-black"
+                        : "text-muted-foreground hover:text-white disabled:opacity-40"
+                    }`}
+                  >
+                    <Columns3 className="w-3 h-3" />
+                    By Bureau
+                  </button>
+                  <button
+                    onClick={() => handleToggleView("raw")}
+                    disabled={isEdited}
+                    className={`px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center gap-1.5 ${
+                      viewMode === "raw"
+                        ? "bg-primary text-black"
+                        : "text-muted-foreground hover:text-white disabled:opacity-40"
+                    }`}
+                  >
+                    <FileCode className="w-3 h-3" />
+                    Raw
+                  </button>
+                  {isEdited && (
+                    <span className="text-[10px] font-mono text-muted-foreground ml-2">
+                      (toggle locked while editing)
+                    </span>
+                  )}
+                </div>
+              )}
+
               <p className="text-xs font-mono text-muted-foreground mb-3">
-                This is the raw text extracted from your credit report. Review it to ensure accuracy.
-                You can edit any details below before proceeding to AI violation analysis.
+                {viewMode === "organized" && isTriBureau
+                  ? "Data organized by bureau (TransUnion, Experian, Equifax) — each bureau's accounts shown top-to-bottom. Edit any details before AI analysis."
+                  : "Raw extracted text from your credit report. Review and edit any details before proceeding to AI violation analysis."}
               </p>
 
               <textarea
                 data-testid="textarea-raw-extracted"
-                value={rawText}
+                value={displayText}
                 onChange={(e) => {
-                  setRawText(e.target.value);
+                  setDisplayText(e.target.value);
                   setIsEdited(true);
                 }}
-                rows={20}
-                className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
+                rows={24}
+                className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[300px]"
                 spellCheck={false}
               />
 
               <div className="flex items-center justify-between mt-3 text-xs font-mono text-muted-foreground">
-                <span>{rawText.split("\n").length} lines</span>
-                <span>{rawText.length.toLocaleString()} chars</span>
+                <span>{displayText.split("\n").length} lines</span>
+                <span>{displayText.length.toLocaleString()} chars</span>
               </div>
             </div>
 
@@ -312,7 +390,7 @@ export default function Upload() {
               <button
                 data-testid="button-proceed-analysis"
                 onClick={handleProceedToAnalysis}
-                disabled={rawText.trim().length < 50}
+                disabled={displayText.trim().length < 50}
                 className="flex-1 px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
                 <ArrowRight className="w-4 h-4" />
@@ -428,7 +506,7 @@ export default function Upload() {
               {logs.map((log, i) => (
                 <div key={i} className="mb-1 flex">
                   <span className="text-primary/70 mr-2">&rsaquo;</span>
-                  <span className={log.includes("ERROR") ? "text-destructive" : log.includes("COMPLETE") ? "text-green-400" : ""}>
+                  <span className={log.includes("ERROR") ? "text-destructive" : log.includes("COMPLETE") ? "text-green-400" : log.includes("TRI-BUREAU") ? "text-blue-400" : ""}>
                     {log}
                   </span>
                 </div>

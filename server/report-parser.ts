@@ -448,3 +448,264 @@ export function batchSections(
 
   return batches;
 }
+
+// ── Tri-Bureau Column Reorganization ──────────────────────────────
+
+/**
+ * Detect bureau column headers from pipe-separated text.
+ * Returns the ordered list of bureau names found, or null if not tri-merge.
+ */
+function detectBureauColumns(text: string): string[] | null {
+  const lines = text.split("\n");
+  for (const line of lines) {
+    if (!line.includes("|")) continue;
+    const parts = line.split("|").map(s => s.trim());
+    const bureaus: string[] = [];
+    const seen = new Set<string>();
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      if (lower === "transunion" && !seen.has("TransUnion")) { bureaus.push("TransUnion"); seen.add("TransUnion"); }
+      else if (lower === "experian" && !seen.has("Experian")) { bureaus.push("Experian"); seen.add("Experian"); }
+      else if (lower === "equifax" && !seen.has("Equifax")) { bureaus.push("Equifax"); seen.add("Equifax"); }
+    }
+    if (bureaus.length >= 2) return bureaus;
+  }
+  return null;
+}
+
+interface BureauField {
+  fieldName: string;
+  values: Record<string, string>;
+}
+
+interface ParsedAccountBlock {
+  creditorName: string;
+  fields: BureauField[];
+}
+
+/**
+ * Parse a block of pipe-separated tri-merge text into per-bureau fields.
+ * Handles lines like: "Balance | $2,450 | $2,450 | $2,450"
+ */
+function parsePipeSeparatedBlock(text: string, bureauOrder: string[]): ParsedAccountBlock | null {
+  const lines = text.split("\n");
+  let creditorName = "";
+  const fields: BureauField[] = [];
+  let columnMap: number[] | null = null; // bureauOrder index → column index
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (!trimmed.includes("|")) {
+      // Non-pipe line — likely a creditor name or section header
+      if (trimmed.length > 3 && !creditorName &&
+          !/^(Personal\s+Information|Account\s+Summary|Account\s+Details|Public\s+Records|Inquiries|Credit\s+Scores?|Addresses|Employers|Credit\s+Report)/i.test(trimmed)) {
+        creditorName = trimmed;
+      }
+      continue;
+    }
+
+    const parts = trimmed.split("|").map(s => s.trim());
+
+    // Check if this is a bureau header row
+    const matchCount = parts.filter(p =>
+      /^(transunion|experian|equifax)$/i.test(p)
+    ).length;
+
+    if (matchCount >= 2) {
+      // Map each bureau to its column index
+      columnMap = bureauOrder.map(bureau =>
+        parts.findIndex(p => p.toLowerCase() === bureau.toLowerCase())
+      );
+      continue;
+    }
+
+    if (!columnMap) continue;
+
+    // Data row: first column is the field name
+    const fieldName = parts[0] || "";
+    if (!fieldName || /^(Field|Summary|Bureau)$/i.test(fieldName)) continue;
+
+    const values: Record<string, string> = {};
+    for (let i = 0; i < bureauOrder.length; i++) {
+      const colIdx = columnMap[i];
+      values[bureauOrder[i]] = (colIdx >= 0 && colIdx < parts.length) ? parts[colIdx] : "--";
+    }
+
+    fields.push({ fieldName, values });
+  }
+
+  if (fields.length === 0) return null;
+  return { creditorName: creditorName || "Unknown", fields };
+}
+
+/**
+ * Reorganize extracted text from pipe-separated tri-merge columns
+ * into a per-bureau top-to-bottom layout:
+ *
+ *   ═══ TRANSUNION — ACCOUNTS ═══
+ *   ── CHASE BANK ──
+ *     Account Number: 4315****1234
+ *     Balance: $2,450
+ *   ── MERRICK BANK ──
+ *     ...
+ *   ═══ EXPERIAN — ACCOUNTS ═══
+ *     ...
+ *
+ * Returns null if the text is not a tri-merge report.
+ */
+export function organizeByBureau(fullText: string, sections: ReportSection[]): string | null {
+  const bureauOrder = detectBureauColumns(fullText);
+  if (!bureauOrder || bureauOrder.length < 2) return null;
+
+  // Classify sections
+  const personalSections: ReportSection[] = [];
+  const summarySections: ReportSection[] = [];
+  const tradelineSections: ReportSection[] = [];
+  const publicSections: ReportSection[] = [];
+  const inquirySections: ReportSection[] = [];
+  const otherSections: ReportSection[] = [];
+
+  for (const s of sections) {
+    switch (s.type) {
+      case "personal_info":  personalSections.push(s); break;
+      case "bureau_summary": summarySections.push(s); break;
+      case "tradeline":      tradelineSections.push(s); break;
+      case "public_records": publicSections.push(s); break;
+      case "inquiries":      inquirySections.push(s); break;
+      default:               otherSections.push(s); break;
+    }
+  }
+
+  const out: string[] = [];
+  const divider = "═".repeat(50);
+
+  // ── Personal Information (per-bureau view) ──
+  if (personalSections.length > 0) {
+    const block = parsePipeSeparatedBlock(
+      personalSections.map(s => s.text).join("\n"),
+      bureauOrder,
+    );
+    out.push(divider);
+    out.push("  PERSONAL INFORMATION");
+    out.push(divider);
+    out.push("");
+
+    if (block && block.fields.length > 0) {
+      for (const bureau of bureauOrder) {
+        out.push(`── ${bureau} ──`);
+        for (const f of block.fields) {
+          const val = f.values[bureau];
+          if (val && val !== "--") {
+            out.push(`  ${f.fieldName}: ${val}`);
+          }
+        }
+        out.push("");
+      }
+    } else {
+      // Non-pipe personal info — include as-is
+      out.push(personalSections.map(s => s.text).join("\n"));
+      out.push("");
+    }
+  }
+
+  // ── Account Summary (per-bureau view) ──
+  if (summarySections.length > 0) {
+    const block = parsePipeSeparatedBlock(
+      summarySections.map(s => s.text).join("\n"),
+      bureauOrder,
+    );
+    out.push(divider);
+    out.push("  ACCOUNT SUMMARY");
+    out.push(divider);
+    out.push("");
+
+    if (block && block.fields.length > 0) {
+      for (const bureau of bureauOrder) {
+        out.push(`── ${bureau} ──`);
+        for (const f of block.fields) {
+          const val = f.values[bureau];
+          if (val && val !== "--") {
+            out.push(`  ${f.fieldName}: ${val}`);
+          }
+        }
+        out.push("");
+      }
+    } else {
+      out.push(summarySections.map(s => s.text).join("\n"));
+      out.push("");
+    }
+  }
+
+  // ── Account Details — organized per-bureau (the core of the reorganization) ──
+  if (tradelineSections.length > 0) {
+    const parsedAccounts: ParsedAccountBlock[] = [];
+    for (const section of tradelineSections) {
+      const parsed = parsePipeSeparatedBlock(section.text, bureauOrder);
+      if (parsed) {
+        parsedAccounts.push(parsed);
+      }
+    }
+
+    if (parsedAccounts.length > 0) {
+      for (const bureau of bureauOrder) {
+        out.push("");
+        out.push(divider);
+        out.push(`  ${bureau.toUpperCase()} — ACCOUNT DETAILS`);
+        out.push(divider);
+        out.push("");
+
+        for (const account of parsedAccounts) {
+          const hasData = account.fields.some(f => {
+            const val = f.values[bureau];
+            return val && val !== "--";
+          });
+
+          out.push(`── ${account.creditorName} ──`);
+          if (!hasData) {
+            out.push("  (Not reported on this bureau)");
+          } else {
+            for (const f of account.fields) {
+              const val = f.values[bureau];
+              if (val && val !== "--") {
+                out.push(`  ${f.fieldName}: ${val}`);
+              }
+            }
+          }
+          out.push("");
+        }
+      }
+    } else {
+      // Could not parse tradelines as pipe-separated — include raw
+      out.push(divider);
+      out.push("  ACCOUNT DETAILS");
+      out.push(divider);
+      out.push("");
+      out.push(tradelineSections.map(s => s.text).join("\n\n"));
+      out.push("");
+    }
+  }
+
+  // ── Public Records (as-is) ──
+  if (publicSections.length > 0) {
+    out.push(divider);
+    out.push("  PUBLIC RECORDS");
+    out.push(divider);
+    out.push("");
+    out.push(publicSections.map(s => s.text).join("\n"));
+    out.push("");
+  }
+
+  // ── Inquiries (as-is) ──
+  if (inquirySections.length > 0) {
+    out.push(divider);
+    out.push("  INQUIRIES");
+    out.push(divider);
+    out.push("");
+    out.push(inquirySections.map(s => s.text).join("\n"));
+    out.push("");
+  }
+
+  return out.join("\n");
+}

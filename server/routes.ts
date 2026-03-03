@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { analyzeReport } from "./analyzer";
 import { detectViolations } from "./ai-services";
 import { runReportPipeline } from "./report-pipeline";
-import { parseReportFile } from "./report-parser";
+import { parseReportFile, organizeByBureau } from "./report-parser";
 
 const createScanSchema = z.object({
   consumerName: z.string().min(1, "consumerName is required"),
@@ -253,11 +253,17 @@ export async function registerRoutes(
 
       const extracted = await parseReportFile(fileContent, fileType, pdfBuffer);
 
+      // Attempt to reorganize by bureau (returns null if not tri-merge)
+      const organized = organizeByBureau(extracted.fullText, extracted.sections);
+
       res.json({
         rawText: extracted.fullText,
+        organizedText: organized,
         fileName: req.file.originalname,
         fileType,
         isImage: false,
+        isTriBureau: organized !== null,
+        bureauCount: organized !== null ? (extracted.fullText.match(/TransUnion|Experian|Equifax/gi) || []).length > 0 ? 3 : 1 : 1,
       });
     } catch (error: any) {
       console.error("Extract text error:", error);

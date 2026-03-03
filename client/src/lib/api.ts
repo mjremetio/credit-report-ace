@@ -120,9 +120,12 @@ export async function extractFileText(file: File) {
     }
     return res.json() as Promise<{
       rawText: string;
+      organizedText: string | null;
       fileName: string;
       fileType: string;
       isImage: boolean;
+      isTriBureau: boolean;
+      bureauCount: number;
     }>;
   } catch (err: any) {
     if (err.name === "AbortError") {
