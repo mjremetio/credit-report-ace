@@ -194,6 +194,88 @@ export async function uploadScanFile(file: File) {
   }
 }
 
+// ========== SEPARATED PIPELINE API: Structure → Review → Violations ==========
+
+export async function structureExtractedText(rawText: string, fileName?: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 600_000); // 10 min for AI structuring
+  try {
+    const res = await fetch("/api/scans/structure-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rawText, fileName }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Structuring failed";
+      try { message = JSON.parse(text).error || message; } catch {}
+      throw new Error(message);
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Structuring timed out. The report may be too large. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function structureUploadFile(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 600_000);
+  try {
+    const res = await fetch("/api/scans/structure-upload", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Structuring failed";
+      try { message = JSON.parse(text).error || message; } catch {}
+      throw new Error(message);
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Structuring timed out. The file may be too large or the server is busy. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function runViolationAnalysis(scanId: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 600_000); // 10 min for violations
+  try {
+    const res = await fetch(`/api/scans/${scanId}/run-violations`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Violation analysis failed";
+      try { message = JSON.parse(text).error || message; } catch {}
+      throw new Error(message);
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Violation analysis timed out. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ========== MANUAL ANALYSIS PIPELINE API ==========
 
 export async function runManualAnalysisPipeline(scanId: number) {

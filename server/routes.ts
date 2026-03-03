@@ -4,7 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { storage } from "./storage";
 import { detectViolations } from "./ai-services";
-import { runReportPipeline, organizeReport, runManualEntryPipeline } from "./report-pipeline";
+import { runReportPipeline, organizeReport, runManualEntryPipeline, runStructurePipeline, runViolationPipeline } from "./report-pipeline";
 import { parseReportFile } from "./report-parser";
 
 const createScanSchema = z.object({
@@ -303,6 +303,111 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Analyze text error:", error);
       res.status(500).json({ error: error.message || "Analysis failed" });
+    }
+  });
+
+  // ========== SEPARATED PIPELINE: Structure → Review → Violations ==========
+
+  // Step A: Structure text into organized JSON only (no violations)
+  app.post("/api/scans/structure-text", async (req, res) => {
+    try {
+      const { rawText, fileName } = req.body;
+      if (!rawText || typeof rawText !== "string" || rawText.trim().length < 50) {
+        return res.status(400).json({ error: "rawText must be at least 50 characters" });
+      }
+
+      const result = await runStructurePipeline(
+        rawText,
+        "text/plain",
+        fileName || "uploaded-report.txt",
+      );
+
+      const organized = organizeReport(result.parsedReport);
+
+      res.json({
+        scanId: result.scanId,
+        parsedReportId: result.parsedReportId,
+        consumerName: result.consumerName,
+        tradelineCount: result.tradelineCount,
+        issueFlagsDetected: result.issueFlagsDetected,
+        summary: {
+          tradelineCount: result.parsedReport.tradelines.length,
+          publicRecordCount: result.parsedReport.publicRecords.length,
+          inquiryCount: result.parsedReport.inquiries.length,
+          scores: result.parsedReport.profile.scores,
+          categorySummaries: result.parsedReport.summary.categorySummaries,
+          actionPlanItems: result.parsedReport.summary.actionPlan.length,
+        },
+        organizedReport: organized,
+      });
+    } catch (error: any) {
+      console.error("Structure text error:", error);
+      res.status(500).json({ error: error.message || "Structuring failed" });
+    }
+  });
+
+  // Step A (file variant): Structure uploaded file into organized JSON only (no violations)
+  app.post("/api/scans/structure-upload", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const ext = req.file.originalname.toLowerCase();
+      const isPdf = ext.endsWith(".pdf") || req.file.mimetype === "application/pdf";
+      const isHtml = ext.endsWith(".html") || ext.endsWith(".htm");
+      const isImage = /\.(png|jpg|jpeg|webp|gif)$/.test(ext) || req.file.mimetype?.startsWith("image/");
+      const fileType = isPdf ? "application/pdf" : isHtml ? "text/html" : isImage ? req.file.mimetype : "text/plain";
+      const fileContent = (isPdf || isImage) ? "" : req.file.buffer.toString("utf-8");
+      const pdfBuffer = isPdf ? req.file.buffer : undefined;
+      const imageBuffer = isImage ? req.file.buffer : undefined;
+
+      const result = await runStructurePipeline(
+        fileContent,
+        fileType,
+        req.file.originalname,
+        pdfBuffer,
+        imageBuffer,
+      );
+
+      const organized = organizeReport(result.parsedReport);
+
+      res.json({
+        scanId: result.scanId,
+        parsedReportId: result.parsedReportId,
+        consumerName: result.consumerName,
+        tradelineCount: result.tradelineCount,
+        issueFlagsDetected: result.issueFlagsDetected,
+        summary: {
+          tradelineCount: result.parsedReport.tradelines.length,
+          publicRecordCount: result.parsedReport.publicRecords.length,
+          inquiryCount: result.parsedReport.inquiries.length,
+          scores: result.parsedReport.profile.scores,
+          categorySummaries: result.parsedReport.summary.categorySummaries,
+          actionPlanItems: result.parsedReport.summary.actionPlan.length,
+        },
+        organizedReport: organized,
+      });
+    } catch (error: any) {
+      console.error("Structure upload error:", error);
+      res.status(500).json({ error: error.message || "Structuring failed" });
+    }
+  });
+
+  // Step B: Run violation detection on an already-structured scan
+  app.post("/api/scans/:scanId/run-violations", async (req, res) => {
+    try {
+      const scanId = parseInt(req.params.scanId);
+      const scan = await storage.getScan(scanId);
+      if (!scan) return res.status(404).json({ error: "Scan not found" });
+
+      const result = await runViolationPipeline(scanId);
+
+      res.json({
+        scanId: result.scanId,
+        accountsCreated: result.accountsCreated,
+        violationsFound: result.violationsFound,
+      });
+    } catch (error: any) {
+      console.error("Violation pipeline error:", error);
+      res.status(500).json({ error: error.message || "Violation analysis failed" });
     }
   });
 
