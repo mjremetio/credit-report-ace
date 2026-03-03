@@ -21,6 +21,7 @@ export type SectionType =
   | "tradeline"
   | "public_records"
   | "inquiries"
+  | "consumer_statement"
   | "unknown";
 
 export interface ReportSection {
@@ -46,6 +47,9 @@ const SECTION_PATTERNS: Array<{ type: SectionType; pattern: RegExp; label?: stri
 
   // Inquiries
   { type: "inquiries", pattern: /(?:^|\n)\s*(?:INQUIRIES|Inquiries|HARD\s+INQUIRIES|SOFT\s+INQUIRIES|REGULAR\s+INQUIRIES|PROMOTIONAL\s+INQUIRIES)/i, label: "Inquiries" },
+
+  // Consumer statements
+  { type: "consumer_statement", pattern: /(?:^|\n)\s*(?:CONSUMER\s+STATEMENT|Consumer\s+Statement|PERSONAL\s+STATEMENT|Personal\s+Statement|STATEMENT\s+BY\s+CONSUMER|YOUR\s+STATEMENT)/i, label: "Consumer Statement" },
 ];
 
 // Patterns that typically start an individual account/tradeline block

@@ -16,6 +16,7 @@ import type {
   TradeBureauDetail,
   PublicRecord,
   Inquiry,
+  ConsumerStatement,
   Bureau,
   AccountType,
   AccountStatus,
@@ -25,6 +26,7 @@ import type {
   LLMPublicRecordExtraction,
   LLMInquiryExtraction,
   LLMBureauSummaryExtraction,
+  LLMConsumerStatementExtraction,
 } from "@shared/credit-report-types";
 import type { ReportSection } from "./report-parser";
 import { batchSections } from "./report-parser";
@@ -173,6 +175,23 @@ Return JSON:
   ]
 }`;
 
+const CONSUMER_STATEMENT_EXTRACTION_PROMPT = `Extract ALL consumer statements (also called "personal statements" or "consumer remarks") from this credit report section.
+
+Consumer statements are free-text statements added by the consumer to their credit file. They may appear per-bureau.
+
+Return JSON:
+{
+  "consumerStatements": [
+    {
+      "bureau": "TransUnion|Experian|Equifax",
+      "statement": "The full text of the consumer statement",
+      "dateAdded": "YYYY-MM-DD or null"
+    }
+  ]
+}
+
+If no consumer statements are found, return: { "consumerStatements": [] }`;
+
 const IMAGE_FULL_EXTRACTION_PROMPT = `This is a credit report image. Extract ALL structured data into JSON.
 
 Return JSON:
@@ -181,7 +200,8 @@ Return JSON:
   "bureauSummaries": [...],
   "tradelines": [...],
   "publicRecords": [...],
-  "inquiries": [...]
+  "inquiries": [...],
+  "consumerStatements": [{ "bureau": "...", "statement": "...", "dateAdded": "..." }]
 }
 
 Use the exact same field shapes as described: tradelines with bureauDetails arrays, per-bureau scores, etc.`;
@@ -235,6 +255,7 @@ interface RawExtraction {
   tradelines: Array<LLMTradelineExtraction & { evidenceText: string }>;
   publicRecords: Array<LLMPublicRecordExtraction & { evidenceText: string }>;
   inquiries: LLMInquiryExtraction[];
+  consumerStatements: LLMConsumerStatementExtraction[];
 }
 
 export async function extractPass1(sections: ReportSection[], imageBuffer?: Buffer, imageMimeType?: string): Promise<RawExtraction> {
@@ -258,6 +279,7 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
         evidenceText: JSON.stringify(r),
       })),
       inquiries: Array.isArray(result.inquiries) ? result.inquiries : [],
+      consumerStatements: Array.isArray(result.consumerStatements) ? result.consumerStatements : [],
     };
   }
 
@@ -266,6 +288,7 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
     tradelines: [],
     publicRecords: [],
     inquiries: [],
+    consumerStatements: [],
   };
 
   // Batch small sections together, process large ones individually
@@ -315,15 +338,25 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
         if (result.inquiries) {
           raw.inquiries.push(...result.inquiries);
         }
+      } else if (primaryType === "consumer_statement") {
+        const result = await llmExtract<{ consumerStatements?: LLMConsumerStatementExtraction[] }>(
+          EXTRACTION_SYSTEM_PROMPT,
+          CONSUMER_STATEMENT_EXTRACTION_PROMPT,
+          batchText,
+        );
+        if (result.consumerStatements) {
+          raw.consumerStatements.push(...result.consumerStatements);
+        }
       } else {
         // Default: treat as tradeline extraction (most sections contain accounts)
         const result = await llmExtract<{
           tradelines?: LLMTradelineExtraction[];
-          // Also accept if profile/inquiries/public_records appear in mixed sections
+          // Also accept if profile/inquiries/public_records/consumer_statements appear in mixed sections
           profile?: LLMProfileExtraction;
           publicRecords?: LLMPublicRecordExtraction[];
           inquiries?: LLMInquiryExtraction[];
           bureauSummaries?: LLMBureauSummaryExtraction[];
+          consumerStatements?: LLMConsumerStatementExtraction[];
         }>(
           EXTRACTION_SYSTEM_PROMPT,
           TRADELINE_EXTRACTION_PROMPT,
@@ -350,6 +383,9 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
         }
         if (result.bureauSummaries) {
           raw.bureauSummaries.push(...result.bureauSummaries);
+        }
+        if (result.consumerStatements) {
+          raw.consumerStatements.push(...result.consumerStatements);
         }
       }
     } catch (err: any) {
@@ -623,12 +659,23 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
     return acc;
   }, []);
 
+  // ── Consumer Statements ──
+  const consumerStatements: ConsumerStatement[] = raw.consumerStatements.map(cs => {
+    const bureau = normalizeBureau(cs.bureau);
+    return {
+      bureau: bureau || "TransUnion" as Bureau,
+      statement: cs.statement || "",
+      dateAdded: cs.dateAdded,
+    };
+  }).filter(cs => cs.statement.length > 0);
+
   return {
     profile,
     bureauSummaries: Array.from(summaryMap.values()),
     tradelines,
     publicRecords,
     inquiries,
+    consumerStatements,
     issueFlags: [], // filled by rule engine
     summary: { accountOneLiners: [], categorySummaries: [], actionPlan: [] }, // filled by summary generator
     metadata: {
