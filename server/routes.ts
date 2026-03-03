@@ -5,7 +5,7 @@ import { z } from "zod";
 import { storage } from "./storage";
 import { analyzeReport } from "./analyzer";
 import { detectViolations } from "./ai-services";
-import { runReportPipeline } from "./report-pipeline";
+import { runReportPipeline, organizeReport } from "./report-pipeline";
 import { parseReportFile } from "./report-parser";
 
 const createScanSchema = z.object({
@@ -205,6 +205,8 @@ export async function registerRoutes(
         imageBuffer,
       );
 
+      const organized = organizeReport(result.parsedReport);
+
       res.json({
         scanId: result.scanId,
         parsedReportId: result.parsedReportId,
@@ -220,6 +222,7 @@ export async function registerRoutes(
           categorySummaries: result.parsedReport.summary.categorySummaries,
           actionPlanItems: result.parsedReport.summary.actionPlan.length,
         },
+        organizedReport: organized,
       });
     } catch (error: any) {
       console.error("Upload scan error:", error);
@@ -279,6 +282,8 @@ export async function registerRoutes(
         fileName || "edited-report.txt",
       );
 
+      const organized = organizeReport(result.parsedReport);
+
       res.json({
         scanId: result.scanId,
         parsedReportId: result.parsedReportId,
@@ -294,6 +299,7 @@ export async function registerRoutes(
           categorySummaries: result.parsedReport.summary.categorySummaries,
           actionPlanItems: result.parsedReport.summary.actionPlan.length,
         },
+        organizedReport: organized,
       });
     } catch (error: any) {
       console.error("Analyze text error:", error);
@@ -704,6 +710,24 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching parsed report:", error);
       res.status(500).json({ error: "Failed to fetch parsed report" });
+    }
+  });
+
+  // GET /api/scans/:id/organized-report — Get the organized credit report JSON
+  // Structured into: Credit Scores, Personal Info, Consumer Statement,
+  // Account Summary, Account History, Public Information, Inquiries, Collections, Creditor Contacts
+  app.get("/api/scans/:id/organized-report", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const parsedReport = await storage.getParsedReportByScan(id);
+      if (!parsedReport) return res.status(404).json({ error: "Parsed report not found for this scan" });
+      const reportJson = parsedReport.reportJson as any;
+      if (!reportJson) return res.status(404).json({ error: "Report JSON not available" });
+      const organized = organizeReport(reportJson);
+      res.json(organized);
+    } catch (error) {
+      console.error("Error fetching organized report:", error);
+      res.status(500).json({ error: "Failed to fetch organized report" });
     }
   });
 

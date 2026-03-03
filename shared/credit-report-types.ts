@@ -207,6 +207,7 @@ export interface ParsedCreditReport {
   tradelines: Tradeline[];
   publicRecords: PublicRecord[];
   inquiries: Inquiry[];
+  consumerStatements: ConsumerStatement[];
   issueFlags: IssueFlag[];
   summary: ReportSummary;
   metadata: {
@@ -215,6 +216,80 @@ export interface ParsedCreditReport {
     sourceFileType?: string;
     totalPages?: number;
     parserVersion: string;
+  };
+}
+
+// ── Consumer Statement ──────────────────────────────────────────────
+export interface ConsumerStatement {
+  bureau: Bureau;
+  statement: string;
+  dateAdded?: string;
+}
+
+// ── Creditor Contact ───────────────────────────────────────────────
+export interface CreditorContact {
+  creditorName: string;
+  address?: string;
+  phone?: string;
+  accountNumberMasked?: string;
+  accountType: AccountType;
+  bureaus: Bureau[];
+}
+
+// ── Organized Credit Report JSON ───────────────────────────────────
+/**
+ * Consumer-facing organized credit report JSON structure.
+ * Groups the parsed data into standard credit report sections:
+ *   - Credit Scores per Bureau
+ *   - Personal Information
+ *   - Consumer Statement
+ *   - Account Summary
+ *   - Account History
+ *   - Public Information
+ *   - Inquiries
+ *   - Collections
+ *   - Creditor Contacts
+ */
+export interface OrganizedCreditReport {
+  creditScores: {
+    TransUnion: { score: number | null; model?: string } | null;
+    Experian: { score: number | null; model?: string } | null;
+    Equifax: { score: number | null; model?: string } | null;
+  };
+  personalInformation: {
+    name: string;
+    aliases: string[];
+    dateOfBirth: string | null;
+    ssn: string | null;
+    reportDate: string;
+    addresses: PersonalAddress[];
+    employers: PersonalEmployer[];
+  };
+  consumerStatements: ConsumerStatement[];
+  accountSummary: {
+    totalAccounts: number;
+    openAccounts: number;
+    closedAccounts: number;
+    derogatoryAccounts: number;
+    collectionAccounts: number;
+    publicRecordCount: number;
+    totalBalance: number | null;
+    totalCreditLimit: number | null;
+    totalMonthlyPayment: number | null;
+    perBureau: BureauSummary[];
+  };
+  accountHistory: Tradeline[];
+  publicInformation: PublicRecord[];
+  inquiries: Inquiry[];
+  collections: Tradeline[];
+  creditorContacts: CreditorContact[];
+  metadata: {
+    parsedAt: string;
+    sourceFileName?: string;
+    sourceFileType?: string;
+    totalPages?: number;
+    parserVersion: string;
+    organizedAt: string;
   };
 }
 
@@ -305,4 +380,10 @@ export interface LLMBureauSummaryExtraction {
   balanceTotal?: number;
   creditLimitTotal?: number;
   monthlyPaymentTotal?: number;
+}
+
+export interface LLMConsumerStatementExtraction {
+  bureau: string;
+  statement: string;
+  dateAdded?: string;
 }

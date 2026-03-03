@@ -17,7 +17,14 @@ import { computeIssueFlags } from "./issue-flags";
 import { generateReportSummary } from "./report-summary";
 import { storage } from "./storage";
 import { detectViolations } from "./ai-services";
-import type { ParsedCreditReport, Tradeline, IssueFlag } from "@shared/credit-report-types";
+import type {
+  ParsedCreditReport,
+  Tradeline,
+  IssueFlag,
+  OrganizedCreditReport,
+  CreditorContact,
+  Bureau,
+} from "@shared/credit-report-types";
 
 export interface PipelineResult {
   scanId: number;
@@ -224,6 +231,158 @@ export async function runReportPipeline(
     accountsCreated: parsedReport.tradelines.length,
     violationsFound: totalViolations,
     issueFlagsDetected: parsedReport.issueFlags.length,
+  };
+}
+
+/**
+ * Transform a ParsedCreditReport into the organized JSON format
+ * with standard credit report sections:
+ *   Credit Scores, Personal Info, Consumer Statement, Account Summary,
+ *   Account History, Public Information, Inquiries, Collections, Creditor Contacts
+ */
+export function organizeReport(report: ParsedCreditReport): OrganizedCreditReport {
+  // ── Credit Scores per Bureau ──
+  const scoreMap: Record<Bureau, { score: number | null; model?: string } | null> = {
+    TransUnion: null,
+    Experian: null,
+    Equifax: null,
+  };
+  for (const s of report.profile.scores) {
+    scoreMap[s.bureau] = { score: s.score, model: s.model };
+  }
+
+  // ── Personal Information ──
+  const personalInformation = {
+    name: report.profile.name,
+    aliases: report.profile.aliases || [],
+    dateOfBirth: report.profile.dateOfBirth || null,
+    ssn: report.profile.ssn || null,
+    reportDate: report.profile.reportDate,
+    addresses: report.profile.addresses,
+    employers: report.profile.employers,
+  };
+
+  // ── Consumer Statements ──
+  const consumerStatements = report.consumerStatements || [];
+
+  // ── Separate collections from regular account history ──
+  const collections: Tradeline[] = [];
+  const accountHistory: Tradeline[] = [];
+  for (const tl of report.tradelines) {
+    if (tl.accountType === "collection" || tl.aggregateStatus === "collection") {
+      collections.push(tl);
+    } else {
+      accountHistory.push(tl);
+    }
+  }
+
+  // ── Account Summary (aggregate from bureau summaries or compute from tradelines) ──
+  let totalAccounts = 0;
+  let openAccounts = 0;
+  let closedAccounts = 0;
+  let derogatoryAccounts = 0;
+  let collectionAccounts = collections.length;
+  let totalBalance: number | null = null;
+  let totalCreditLimit: number | null = null;
+  let totalMonthlyPayment: number | null = null;
+
+  if (report.bureauSummaries.length > 0) {
+    // Use the max values across bureaus for totals
+    for (const bs of report.bureauSummaries) {
+      totalAccounts = Math.max(totalAccounts, bs.totalAccounts);
+      openAccounts = Math.max(openAccounts, bs.openAccounts);
+      closedAccounts = Math.max(closedAccounts, bs.closedAccounts);
+      derogatoryAccounts = Math.max(derogatoryAccounts, bs.derogatoryCount);
+      if (bs.balanceTotal != null) {
+        totalBalance = Math.max(totalBalance || 0, bs.balanceTotal);
+      }
+      if (bs.creditLimitTotal != null) {
+        totalCreditLimit = Math.max(totalCreditLimit || 0, bs.creditLimitTotal);
+      }
+      if (bs.monthlyPaymentTotal != null) {
+        totalMonthlyPayment = Math.max(totalMonthlyPayment || 0, bs.monthlyPaymentTotal);
+      }
+    }
+  } else {
+    // Compute from tradelines
+    totalAccounts = report.tradelines.length;
+    for (const tl of report.tradelines) {
+      if (tl.aggregateStatus === "current" || tl.aggregateStatus === "late") openAccounts++;
+      if (tl.aggregateStatus === "closed" || tl.aggregateStatus === "paid" || tl.aggregateStatus === "settled") closedAccounts++;
+      if (tl.aggregateStatus === "chargeoff" || tl.aggregateStatus === "derogatory" || tl.aggregateStatus === "repossession") derogatoryAccounts++;
+      if (tl.balance != null) totalBalance = (totalBalance || 0) + tl.balance;
+    }
+  }
+
+  // ── Creditor Contacts ──
+  const contactMap = new Map<string, CreditorContact>();
+  for (const tl of report.tradelines) {
+    const key = tl.creditorName.toLowerCase().trim();
+    if (!contactMap.has(key)) {
+      // Extract address/phone from bureau details remarks if available
+      let address: string | undefined;
+      let phone: string | undefined;
+      for (const bd of tl.bureauDetails) {
+        for (const remark of bd.remarks || []) {
+          // Try to extract phone numbers from remarks
+          const phoneMatch = remark.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+          if (phoneMatch && !phone) phone = phoneMatch[0];
+        }
+      }
+      // Check if address info is in the evidence text
+      if (tl.evidenceText) {
+        const addrMatch = tl.evidenceText.match(/(?:Address|Addr)[:\s]+([^\n]+)/i);
+        if (addrMatch) address = addrMatch[1].trim();
+        if (!phone) {
+          const phoneMatch2 = tl.evidenceText.match(/(?:Phone|Tel)[:\s]+(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i);
+          if (phoneMatch2) phone = phoneMatch2[1].trim();
+        }
+      }
+
+      contactMap.set(key, {
+        creditorName: tl.creditorName,
+        address,
+        phone,
+        accountNumberMasked: tl.accountNumberMasked,
+        accountType: tl.accountType,
+        bureaus: tl.bureaus,
+      });
+    }
+  }
+
+  return {
+    creditScores: {
+      TransUnion: scoreMap.TransUnion,
+      Experian: scoreMap.Experian,
+      Equifax: scoreMap.Equifax,
+    },
+    personalInformation,
+    consumerStatements,
+    accountSummary: {
+      totalAccounts,
+      openAccounts,
+      closedAccounts,
+      derogatoryAccounts,
+      collectionAccounts,
+      publicRecordCount: report.publicRecords.length,
+      totalBalance,
+      totalCreditLimit,
+      totalMonthlyPayment,
+      perBureau: report.bureauSummaries,
+    },
+    accountHistory,
+    publicInformation: report.publicRecords,
+    inquiries: report.inquiries,
+    collections,
+    creditorContacts: Array.from(contactMap.values()),
+    metadata: {
+      parsedAt: report.metadata.parsedAt,
+      sourceFileName: report.metadata.sourceFileName,
+      sourceFileType: report.metadata.sourceFileType,
+      totalPages: report.metadata.totalPages,
+      parserVersion: report.metadata.parserVersion,
+      organizedAt: new Date().toISOString(),
+    },
   };
 }
 
