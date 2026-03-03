@@ -101,6 +101,66 @@ export async function scanAccountForViolations(accountId: number) {
   }
 }
 
+export async function extractFileText(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min for text extraction
+  try {
+    const res = await fetch("/api/scans/upload-extract", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Text extraction failed";
+      try { message = JSON.parse(text).error || message; } catch {}
+      throw new Error(message);
+    }
+    return res.json() as Promise<{
+      rawText: string;
+      fileName: string;
+      fileType: string;
+      isImage: boolean;
+    }>;
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Text extraction timed out. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function analyzeExtractedText(rawText: string, fileName?: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 600_000); // 10 min for AI analysis
+  try {
+    const res = await fetch("/api/scans/analyze-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rawText, fileName }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Analysis failed";
+      try { message = JSON.parse(text).error || message; } catch {}
+      throw new Error(message);
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Analysis timed out. The report may be too large. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function uploadScanFile(file: File) {
   const formData = new FormData();
   formData.append("file", file);
