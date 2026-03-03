@@ -6,7 +6,8 @@ import { storage } from "./storage";
 import { analyzeReport } from "./analyzer";
 import { detectViolations } from "./ai-services";
 import { runReportPipeline, organizeReport } from "./report-pipeline";
-import { parseReportFile } from "./report-parser";
+import { parseReportFile, splitIntoSections } from "./report-parser";
+import { extractCreditReport } from "./report-extractor";
 
 const createScanSchema = z.object({
   consumerName: z.string().min(1, "consumerName is required"),
@@ -233,6 +234,7 @@ export async function registerRoutes(
   // ========== TWO-STEP UPLOAD: Extract Text → Review → Analyze ==========
 
   // Step 1: Extract text only (no LLM, no DB) — fast
+  // Returns raw text AND detected sections so the user can verify what was captured
   app.post("/api/scans/upload-extract", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -247,6 +249,8 @@ export async function registerRoutes(
           fileName: req.file.originalname,
           fileType: req.file.mimetype,
           isImage: true,
+          sections: [],
+          sectionSummary: {},
         });
       }
 
@@ -256,11 +260,24 @@ export async function registerRoutes(
 
       const extracted = await parseReportFile(fileContent, fileType, pdfBuffer);
 
+      // Build section summary for the user to verify what was detected
+      const sectionSummary: Record<string, number> = {};
+      for (const s of extracted.sections) {
+        sectionSummary[s.type] = (sectionSummary[s.type] || 0) + 1;
+      }
+
       res.json({
         rawText: extracted.fullText,
         fileName: req.file.originalname,
         fileType,
         isImage: false,
+        sections: extracted.sections.map(s => ({
+          type: s.type,
+          label: s.label,
+          charCount: s.text.length,
+          preview: s.text.slice(0, 200),
+        })),
+        sectionSummary,
       });
     } catch (error: any) {
       console.error("Extract text error:", error);
@@ -304,6 +321,57 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Analyze text error:", error);
       res.status(500).json({ error: error.message || "Analysis failed" });
+    }
+  });
+
+  // ========== DIRECT ORGANIZE: Raw text → Organized JSON (no DB, no violations) ==========
+  // Fast path: extract + organize only. Useful for preview before committing to full pipeline.
+  app.post("/api/scans/organize-text", async (req, res) => {
+    try {
+      const { rawText, fileName } = req.body;
+      if (!rawText || typeof rawText !== "string" || rawText.trim().length < 50) {
+        return res.status(400).json({ error: "rawText must be at least 50 characters" });
+      }
+
+      // Step 1: Split raw text into sections
+      const sections = splitIntoSections(rawText);
+      console.log(`[organize-text] Split into ${sections.length} sections`);
+
+      // Step 2: LLM extraction → ParsedCreditReport
+      const parsedReport = await extractCreditReport(sections);
+
+      // Step 3: Compute issue flags (deterministic, no LLM)
+      const { computeIssueFlags } = await import("./issue-flags");
+      parsedReport.issueFlags = computeIssueFlags(parsedReport);
+
+      // Step 4: Generate summaries
+      const { generateReportSummary } = await import("./report-summary");
+      parsedReport.summary = generateReportSummary(parsedReport);
+
+      // Step 5: Organize into standard sections
+      parsedReport.metadata.sourceFileName = fileName;
+      parsedReport.metadata.sourceFileType = "text/plain";
+      const organized = organizeReport(parsedReport);
+
+      res.json({
+        organizedReport: organized,
+        issueFlags: parsedReport.issueFlags,
+        summary: parsedReport.summary,
+        sectionBreakdown: {
+          creditScores: organized.creditScores,
+          personalInformation: organized.personalInformation,
+          consumerStatements: organized.consumerStatements,
+          accountSummary: organized.accountSummary,
+          accountHistoryCount: organized.accountHistory.length,
+          publicInformationCount: organized.publicInformation.length,
+          inquiryCount: organized.inquiries.length,
+          collectionCount: organized.collections.length,
+          creditorContactCount: organized.creditorContacts.length,
+        },
+      });
+    } catch (error: any) {
+      console.error("Organize text error:", error);
+      res.status(500).json({ error: error.message || "Organization failed" });
     }
   });
 

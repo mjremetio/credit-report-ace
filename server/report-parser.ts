@@ -152,7 +152,11 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 }
 
 export function cleanRawText(content: string): string {
-  return content.replace(/\s+/g, " ").trim();
+  // Preserve newlines (needed for section header detection) but collapse other whitespace
+  return content
+    .replace(/[^\S\n]+/g, " ")   // collapse spaces/tabs but keep \n
+    .replace(/\n{3,}/g, "\n\n")  // collapse 3+ blank lines to double
+    .trim();
 }
 
 // ── Section splitting ──────────────────────────────────────────────
@@ -236,7 +240,8 @@ export function splitIntoSections(fullText: string): ReportSection[] {
         section.type !== "personal_info" &&
         section.type !== "inquiries" &&
         section.type !== "public_records" &&
-        section.type !== "bureau_summary") {
+        section.type !== "bureau_summary" &&
+        section.type !== "consumer_statement") {
         const blocks = splitTradelineSection(section.text, section.startIndex);
         if (blocks.some(b => b.type === "tradeline")) {
           expandedSections.push(...blocks);
