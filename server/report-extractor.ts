@@ -45,6 +45,9 @@ const EXTRACTION_SYSTEM_PROMPT = `You are a precise credit report data extractor
 ## RULES:
 - Extract EXACTLY what the report says — do not infer or fabricate data
 - For tri-merge reports, extract PER-BUREAU values separately (TransUnion, Experian, Equifax)
+- The text may contain pre-structured bureau labels in the format:
+  "Field Name | TransUnion: value1 | Experian: value2 | Equifax: value3"
+  When you see this format, extract each bureau's value into the correct bureauDetails entry.
 - "--" means "not reported by this bureau" (use null)
 - Preserve masked account numbers exactly as shown
 - Dates should be in "YYYY-MM" or "YYYY-MM-DD" format
@@ -52,6 +55,7 @@ const EXTRACTION_SYSTEM_PROMPT = `You are a precise credit report data extractor
 - Extract ALL remarks/comments verbatim — these are critical for dispute analysis
 - If a section contains multiple accounts, extract each one separately
 - Payment history grids should be extracted month-by-month with the status code
+- Section markers like "=== SECTION NAME ===" indicate report sections
 
 Return ONLY valid JSON.`;
 
