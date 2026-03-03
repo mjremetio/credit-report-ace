@@ -520,22 +520,73 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
       }
     }
 
+    // ── Aggregate balance from bureau details if top-level is missing ──
+    let balance: number | null = typeof t.balance === "number" ? t.balance : null;
+    if (balance === null && uniqueBureauDetails.length > 0) {
+      // Use the highest balance across bureaus (most conservative for dispute purposes)
+      const bureauBalances = uniqueBureauDetails
+        .filter(bd => bd.balance !== null && bd.balance !== undefined)
+        .map(bd => bd.balance!);
+      if (bureauBalances.length > 0) {
+        balance = Math.max(...bureauBalances);
+      }
+    }
+
+    // ── Aggregate dates from bureau details if top-level is missing ──
+    const dates: {
+      opened?: string;
+      closed?: string;
+      firstDelinquency?: string;
+      lastPayment?: string;
+      lastReported?: string;
+    } = {
+      opened: t.dates?.opened,
+      closed: t.dates?.closed,
+      firstDelinquency: t.dates?.firstDelinquency,
+      lastPayment: t.dates?.lastPayment,
+      lastReported: t.dates?.lastReported,
+    };
+
+    if (uniqueBureauDetails.length > 0) {
+      // Fill missing dates from bureau details (use earliest for opened, latest for others)
+      if (!dates.opened) {
+        const openedDates = uniqueBureauDetails.filter(bd => bd.dateOpened).map(bd => bd.dateOpened!);
+        if (openedDates.length > 0) dates.opened = openedDates.sort()[0]; // earliest
+      }
+      if (!dates.closed) {
+        const closedDates = uniqueBureauDetails.filter(bd => bd.dateClosed).map(bd => bd.dateClosed!);
+        if (closedDates.length > 0) dates.closed = closedDates.sort().reverse()[0]; // latest
+      }
+      if (!dates.lastPayment) {
+        const lpDates = uniqueBureauDetails.filter(bd => bd.lastPaymentDate).map(bd => bd.lastPaymentDate!);
+        if (lpDates.length > 0) dates.lastPayment = lpDates.sort().reverse()[0]; // latest
+      }
+      if (!dates.lastReported) {
+        const lrDates = uniqueBureauDetails.filter(bd => bd.lastReportedDate).map(bd => bd.lastReportedDate!);
+        if (lrDates.length > 0) dates.lastReported = lrDates.sort().reverse()[0]; // latest
+      }
+    }
+
+    // ── Aggregate status from bureau details if top-level is missing ──
+    let aggregateStatus = normalizeAccountStatus(t.status);
+    if (aggregateStatus === "other" && uniqueBureauDetails.length > 0) {
+      const statuses = uniqueBureauDetails.filter(bd => bd.status).map(bd => normalizeAccountStatus(bd.status));
+      const severityOrder: AccountStatus[] = ["chargeoff", "collection", "repossession", "bankruptcy", "derogatory", "late", "settled", "paid", "closed", "current", "other"];
+      for (const s of severityOrder) {
+        if (statuses.includes(s)) { aggregateStatus = s; break; }
+      }
+    }
+
     return {
       creditorName: t.creditorName || "Unknown",
       accountNumberMasked: t.accountNumberMasked,
       accountType: normalizeAccountType(t.accountType),
-      aggregateStatus: normalizeAccountStatus(t.status),
+      aggregateStatus,
       originalCreditor: t.originalCreditor || undefined,
-      balance: typeof t.balance === "number" ? t.balance : null,
+      balance,
       bureaus,
       bureauDetails: uniqueBureauDetails,
-      dates: {
-        opened: t.dates?.opened,
-        closed: t.dates?.closed,
-        firstDelinquency: t.dates?.firstDelinquency,
-        lastPayment: t.dates?.lastPayment,
-        lastReported: t.dates?.lastReported,
-      },
+      dates,
       remarks: Array.from(allRemarks),
       evidenceText: t.evidenceText,
     };
