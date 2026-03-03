@@ -1,38 +1,107 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
-  UploadCloud, Activity, Loader2, CheckCircle2, AlertTriangle, FileText
+  UploadCloud, Activity, Loader2, CheckCircle2, AlertTriangle, FileText,
+  Edit3, ArrowRight, RotateCcw, Eye
 } from "lucide-react";
-import { uploadScanFile } from "@/lib/api";
+import { extractFileText, analyzeExtractedText, uploadScanFile } from "@/lib/api";
+
+type UploadPhase = "idle" | "extracting" | "reviewing" | "analyzing" | "complete";
 
 export default function Upload() {
   const [, navigate] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadLogs, setUploadLogs] = useState<string[]>([]);
+  const [phase, setPhase] = useState<UploadPhase>("idle");
+  const [logs, setLogs] = useState<string[]>([]);
   const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const uploadMutation = useMutation({
-    mutationFn: uploadScanFile,
+  // Review state
+  const [rawText, setRawText] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [isEdited, setIsEdited] = useState(false);
+
+  const addLog = (msg: string) => setLogs(prev => [...prev, `[${ts()}] ${msg}`]);
+
+  // Phase 1: Extract text from file (fast, no LLM)
+  const extractMutation = useMutation({
+    mutationFn: extractFileText,
     onMutate: () => {
-      setUploadLogs([`[${ts()}] INITIATING UPLOAD...`]);
-      setResult(null);
+      setPhase("extracting");
+      setError(null);
+      setLogs([`[${ts()}] INITIATING UPLOAD...`]);
     },
     onSuccess: (data) => {
-      setUploadLogs(prev => [
-        ...prev,
-        `[${ts()}] FILE UPLOADED SUCCESSFULLY.`,
-        `[${ts()}] AI ENGINE: Parsing credit report...`,
-        `[${ts()}] SCAN CREATED — ID: ${data.scanId}`,
-        `[${ts()}] EXTRACTED: ${data.accountsCreated} negative accounts.`,
-        `[${ts()}] DETECTED: ${data.violationsFound} potential FCRA violations.`,
-        `[${ts()}] ANALYSIS COMPLETE.`,
-      ]);
-      setResult(data);
+      if (data.isImage) {
+        // Images can't show raw text — go directly to full analysis
+        addLog("IMAGE DETECTED — Skipping text preview, proceeding to AI analysis...");
+        if (originalFile) {
+          fullUploadMutation.mutate(originalFile);
+        }
+      } else {
+        addLog("TEXT EXTRACTED SUCCESSFULLY.");
+        addLog(`FILE: ${data.fileName} (${data.fileType})`);
+        addLog(`EXTRACTED ${data.rawText.length.toLocaleString()} characters.`);
+        addLog("READY FOR REVIEW — Edit if needed, then proceed to analysis.");
+        setRawText(data.rawText);
+        setFileName(data.fileName);
+        setPhase("reviewing");
+      }
     },
     onError: (err: Error) => {
-      setUploadLogs(prev => [...prev, `[${ts()}] ERROR: ${err.message}`]);
+      addLog(`ERROR: ${err.message}`);
+      setError(err.message);
+      setPhase("idle");
+    },
+  });
+
+  // For images: use full upload pipeline (same as before)
+  const fullUploadMutation = useMutation({
+    mutationFn: uploadScanFile,
+    onMutate: () => {
+      setPhase("analyzing");
+      addLog("AI ENGINE: Processing image...");
+    },
+    onSuccess: (data) => {
+      addLog(`SCAN CREATED — ID: ${data.scanId}`);
+      addLog(`EXTRACTED: ${data.accountsCreated} negative accounts.`);
+      addLog(`DETECTED: ${data.violationsFound} potential FCRA violations.`);
+      addLog("ANALYSIS COMPLETE.");
+      setResult(data);
+      setPhase("complete");
+    },
+    onError: (err: Error) => {
+      addLog(`ERROR: ${err.message}`);
+      setError(err.message);
+      setPhase("idle");
+    },
+  });
+
+  // Phase 2: Analyze the (possibly edited) text through the full pipeline
+  const analyzeMutation = useMutation({
+    mutationFn: ({ text, name }: { text: string; name: string }) =>
+      analyzeExtractedText(text, name),
+    onMutate: () => {
+      setPhase("analyzing");
+      setError(null);
+      addLog("INITIATING AI ANALYSIS...");
+      addLog("AI ENGINE: Parsing credit report data...");
+    },
+    onSuccess: (data) => {
+      addLog(`SCAN CREATED — ID: ${data.scanId}`);
+      addLog(`EXTRACTED: ${data.accountsCreated} negative accounts.`);
+      addLog(`DETECTED: ${data.violationsFound} potential FCRA violations.`);
+      addLog("ANALYSIS COMPLETE.");
+      setResult(data);
+      setPhase("complete");
+    },
+    onError: (err: Error) => {
+      addLog(`ERROR: ${err.message}`);
+      setError(err.message);
+      setPhase("reviewing"); // Go back to review on failure
     },
   });
 
@@ -40,19 +109,43 @@ export default function Upload() {
     fileInputRef.current?.click();
   }, []);
 
+  const handleFile = useCallback((file: File) => {
+    setOriginalFile(file);
+    setResult(null);
+    setError(null);
+    setRawText("");
+    setIsEdited(false);
+    extractMutation.mutate(file);
+  }, [extractMutation]);
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) uploadMutation.mutate(file);
+    if (file) handleFile(file);
     e.target.value = "";
-  }, [uploadMutation]);
+  }, [handleFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file) uploadMutation.mutate(file);
-  }, [uploadMutation]);
+    if (file) handleFile(file);
+  }, [handleFile]);
 
-  const isProcessing = uploadMutation.isPending;
+  const handleProceedToAnalysis = () => {
+    analyzeMutation.mutate({ text: rawText, name: fileName });
+  };
+
+  const handleReset = () => {
+    setPhase("idle");
+    setLogs([]);
+    setResult(null);
+    setError(null);
+    setRawText("");
+    setFileName("");
+    setOriginalFile(null);
+    setIsEdited(false);
+  };
+
+  const isProcessing = phase === "extracting" || phase === "analyzing";
 
   return (
     <div className="h-full">
@@ -60,7 +153,7 @@ export default function Upload() {
         <h2 className="font-display font-medium text-lg text-white">Upload Credit Report</h2>
       </header>
 
-      <div className="p-6 max-w-3xl mx-auto mt-6 space-y-6">
+      <div className="p-6 max-w-4xl mx-auto mt-6 space-y-6">
         <input
           ref={fileInputRef}
           type="file"
@@ -70,48 +163,36 @@ export default function Upload() {
           data-testid="input-file-upload"
         />
 
-        {!result && (
+        {/* ── IDLE: Upload Drop Zone ── */}
+        {phase === "idle" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
+            {error && (
+              <div className="mb-4 bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0" />
+                <p className="text-sm font-mono text-destructive">{error}</p>
+              </div>
+            )}
+
             <div
-              onClick={!isProcessing ? handleFileSelect : undefined}
+              onClick={handleFileSelect}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
               data-testid="drop-zone"
-              className={`relative border-2 border-dashed ${isProcessing ? 'border-primary' : 'border-border hover:border-primary/50'} rounded-xl p-12 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-card overflow-hidden`}
+              className="relative border-2 border-dashed border-border hover:border-primary/50 rounded-xl p-12 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-card overflow-hidden"
             >
-              {isProcessing && <div className="scan-line" />}
-
-              <div className={`p-4 rounded-full mb-4 ${isProcessing ? 'bg-primary/20 text-primary' : 'bg-secondary text-muted-foreground'}`}>
-                {isProcessing ? <Activity className="w-8 h-8 animate-pulse" /> : <UploadCloud className="w-8 h-8" />}
+              <div className="p-4 rounded-full mb-4 bg-secondary text-muted-foreground">
+                <UploadCloud className="w-8 h-8" />
               </div>
               <h3 className="font-display text-xl font-medium mb-2 text-white">
-                {isProcessing ? "AI Processing..." : "Upload Credit Report"}
+                Upload Credit Report
               </h3>
               <p className="text-muted-foreground max-w-md font-mono text-sm">
-                {isProcessing
-                  ? "Extracting accounts and scanning for FCRA violations..."
-                  : "Drag and drop a credit report (HTML, PDF, TXT, or image) or click to browse. AI will extract negative accounts and detect violations automatically."}
+                Drag and drop a credit report (HTML, PDF, TXT, or image) or click to browse.
+                You'll review the extracted data before AI analysis begins.
               </p>
-
-              {isProcessing && (
-                <div className="w-full max-w-md mt-8">
-                  <div className="flex justify-between text-xs font-mono mb-2">
-                    <span className="text-primary">Analyzing...</span>
-                    <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                  </div>
-                  <div className="h-1 bg-secondary w-full rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full bg-primary"
-                      initial={{ width: "0%" }}
-                      animate={{ width: "100%" }}
-                      transition={{ duration: 30, ease: "linear" }}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="mt-6 bg-card border border-border rounded-xl p-5">
@@ -119,9 +200,9 @@ export default function Upload() {
               <div className="space-y-3">
                 {[
                   { step: 1, text: "Upload your credit report file (HTML, PDF, TXT, or image)" },
-                  { step: 2, text: "AI extracts all accounts and identifies negative items" },
-                  { step: 3, text: "Each account is scanned for FCRA violations" },
-                  { step: 4, text: "Review results in the same workflow as manual entry" },
+                  { step: 2, text: "Review extracted raw data — edit any details if needed" },
+                  { step: 3, text: "AI analyzes the data for FCRA violations" },
+                  { step: 4, text: "Review results in the guided workflow" },
                 ].map((item) => (
                   <div key={item.step} className="flex items-center gap-3">
                     <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-mono flex-shrink-0">
@@ -135,7 +216,157 @@ export default function Upload() {
           </motion.div>
         )}
 
-        {result && (
+        {/* ── EXTRACTING: Progress Animation ── */}
+        {phase === "extracting" && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="relative border-2 border-dashed border-primary rounded-xl p-12 flex flex-col items-center justify-center text-center bg-card overflow-hidden">
+              <div className="scan-line" />
+              <div className="p-4 rounded-full mb-4 bg-primary/20 text-primary">
+                <Activity className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="font-display text-xl font-medium mb-2 text-white">
+                Extracting Text...
+              </h3>
+              <p className="text-muted-foreground max-w-md font-mono text-sm">
+                Reading and parsing your credit report file...
+              </p>
+              <div className="w-full max-w-md mt-8">
+                <div className="flex justify-between text-xs font-mono mb-2">
+                  <span className="text-primary">Extracting...</span>
+                  <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                </div>
+                <div className="h-1 bg-secondary w-full rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-primary"
+                    initial={{ width: "0%" }}
+                    animate={{ width: "90%" }}
+                    transition={{ duration: 8, ease: "linear" }}
+                  />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── REVIEWING: Show raw text with edit capability ── */}
+        {phase === "reviewing" && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="bg-card border border-primary/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Eye className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-lg text-white">Review Extracted Data</h3>
+                    <p className="text-xs font-mono text-muted-foreground">
+                      {fileName} — {rawText.length.toLocaleString()} characters extracted
+                    </p>
+                  </div>
+                </div>
+                {isEdited && (
+                  <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-400 bg-yellow-500/10">
+                    <Edit3 className="w-3 h-3 inline mr-1" />edited
+                  </span>
+                )}
+              </div>
+
+              <p className="text-xs font-mono text-muted-foreground mb-3">
+                This is the raw text extracted from your credit report. Review it to ensure accuracy.
+                You can edit any details below before proceeding to AI violation analysis.
+              </p>
+
+              <textarea
+                data-testid="textarea-raw-extracted"
+                value={rawText}
+                onChange={(e) => {
+                  setRawText(e.target.value);
+                  setIsEdited(true);
+                }}
+                rows={20}
+                className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
+                spellCheck={false}
+              />
+
+              <div className="flex items-center justify-between mt-3 text-xs font-mono text-muted-foreground">
+                <span>{rawText.split("\n").length} lines</span>
+                <span>{rawText.length.toLocaleString()} chars</span>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0" />
+                <p className="text-sm font-mono text-destructive">{error}</p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                data-testid="button-proceed-analysis"
+                onClick={handleProceedToAnalysis}
+                disabled={rawText.trim().length < 50}
+                className="flex-1 px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                <ArrowRight className="w-4 h-4" />
+                Proceed to AI Analysis
+              </button>
+              <button
+                data-testid="button-start-over"
+                onClick={handleReset}
+                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors font-mono text-sm inline-flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Start Over
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── ANALYZING: AI Processing Progress ── */}
+        {phase === "analyzing" && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="relative border-2 border-dashed border-primary rounded-xl p-12 flex flex-col items-center justify-center text-center bg-card overflow-hidden">
+              <div className="scan-line" />
+              <div className="p-4 rounded-full mb-4 bg-primary/20 text-primary">
+                <Activity className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="font-display text-xl font-medium mb-2 text-white">
+                AI Analyzing Report...
+              </h3>
+              <p className="text-muted-foreground max-w-md font-mono text-sm">
+                Extracting accounts, detecting FCRA violations, and generating analysis...
+              </p>
+              <div className="w-full max-w-md mt-8">
+                <div className="flex justify-between text-xs font-mono mb-2">
+                  <span className="text-primary">Analyzing...</span>
+                  <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                </div>
+                <div className="h-1 bg-secondary w-full rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-primary"
+                    initial={{ width: "0%" }}
+                    animate={{ width: "100%" }}
+                    transition={{ duration: 60, ease: "linear" }}
+                  />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── COMPLETE: Results ── */}
+        {phase === "complete" && result && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -176,7 +407,7 @@ export default function Upload() {
               </button>
               <button
                 data-testid="button-upload-another"
-                onClick={() => { setResult(null); setUploadLogs([]); }}
+                onClick={handleReset}
                 className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors font-mono text-sm"
               >
                 Upload Another
@@ -185,15 +416,16 @@ export default function Upload() {
           </motion.div>
         )}
 
+        {/* ── Terminal Logs ── */}
         <AnimatePresence>
-          {uploadLogs.length > 0 && (
+          {logs.length > 0 && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               className="bg-[#0a0a0c] border border-border rounded-lg p-4 font-mono text-xs text-muted-foreground max-h-48 overflow-y-auto"
               data-testid="terminal-logs"
             >
-              {uploadLogs.map((log, i) => (
+              {logs.map((log, i) => (
                 <div key={i} className="mb-1 flex">
                   <span className="text-primary/70 mr-2">&rsaquo;</span>
                   <span className={log.includes("ERROR") ? "text-destructive" : log.includes("COMPLETE") ? "text-green-400" : ""}>

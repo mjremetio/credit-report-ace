@@ -6,6 +6,7 @@ import { storage } from "./storage";
 import { analyzeReport } from "./analyzer";
 import { detectViolations } from "./ai-services";
 import { runReportPipeline } from "./report-pipeline";
+import { parseReportFile } from "./report-parser";
 
 const createScanSchema = z.object({
   consumerName: z.string().min(1, "consumerName is required"),
@@ -223,6 +224,80 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Upload scan error:", error);
       res.status(500).json({ error: error.message || "Upload and analysis failed" });
+    }
+  });
+
+  // ========== TWO-STEP UPLOAD: Extract Text → Review → Analyze ==========
+
+  // Step 1: Extract text only (no LLM, no DB) — fast
+  app.post("/api/scans/upload-extract", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const ext = req.file.originalname.toLowerCase();
+      const isPdf = ext.endsWith(".pdf") || req.file.mimetype === "application/pdf";
+      const isHtml = ext.endsWith(".html") || ext.endsWith(".htm");
+      const isImage = /\.(png|jpg|jpeg|webp|gif)$/.test(ext) || req.file.mimetype?.startsWith("image/");
+
+      if (isImage) {
+        return res.json({
+          rawText: "",
+          fileName: req.file.originalname,
+          fileType: req.file.mimetype,
+          isImage: true,
+        });
+      }
+
+      const fileType = isPdf ? "application/pdf" : isHtml ? "text/html" : "text/plain";
+      const fileContent = isPdf ? "" : req.file.buffer.toString("utf-8");
+      const pdfBuffer = isPdf ? req.file.buffer : undefined;
+
+      const extracted = await parseReportFile(fileContent, fileType, pdfBuffer);
+
+      res.json({
+        rawText: extracted.fullText,
+        fileName: req.file.originalname,
+        fileType,
+        isImage: false,
+      });
+    } catch (error: any) {
+      console.error("Extract text error:", error);
+      res.status(500).json({ error: error.message || "Text extraction failed" });
+    }
+  });
+
+  // Step 2: Analyze previously extracted (and possibly edited) text through full pipeline
+  app.post("/api/scans/analyze-text", async (req, res) => {
+    try {
+      const { rawText, fileName } = req.body;
+      if (!rawText || typeof rawText !== "string" || rawText.trim().length < 50) {
+        return res.status(400).json({ error: "rawText must be at least 50 characters" });
+      }
+
+      const result = await runReportPipeline(
+        rawText,
+        "text/plain",
+        fileName || "edited-report.txt",
+      );
+
+      res.json({
+        scanId: result.scanId,
+        parsedReportId: result.parsedReportId,
+        consumerName: result.consumerName,
+        accountsCreated: result.accountsCreated,
+        violationsFound: result.violationsFound,
+        issueFlagsDetected: result.issueFlagsDetected,
+        summary: {
+          tradelineCount: result.parsedReport.tradelines.length,
+          publicRecordCount: result.parsedReport.publicRecords.length,
+          inquiryCount: result.parsedReport.inquiries.length,
+          scores: result.parsedReport.profile.scores,
+          categorySummaries: result.parsedReport.summary.categorySummaries,
+          actionPlanItems: result.parsedReport.summary.actionPlan.length,
+        },
+      });
+    } catch (error: any) {
+      console.error("Analyze text error:", error);
+      res.status(500).json({ error: error.message || "Analysis failed" });
     }
   });
 
