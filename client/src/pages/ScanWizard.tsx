@@ -49,7 +49,12 @@ export default function ScanWizard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scan", scanId] }),
   });
 
-  const step = scan?.currentStep || 1;
+  // For upload-based scans (hasParsedReport), always show step 4 (Analyze & Review)
+  // since the data has already been structured by the upload pipeline.
+  // For manual scans, follow the stored currentStep.
+  const isUploadBased = scan?.hasParsedReport || false;
+  const rawStep = scan?.currentStep || 1;
+  const step = isUploadBased ? Math.max(rawStep, 4) : rawStep;
 
   const goToStep = (s: number) => {
     if (s >= 1 && s <= 4) {
@@ -93,27 +98,33 @@ export default function ScanWizard() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {STEPS.map((s, i) => (
-            <div key={s.num} className="flex items-center">
-              <button
-                data-testid={`step-indicator-${s.num}`}
-                onClick={() => goToStep(s.num)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all ${
-                  step === s.num
-                    ? "bg-primary text-primary-foreground"
-                    : s.num < step
-                    ? "bg-primary/20 text-primary"
-                    : "bg-secondary text-muted-foreground"
-                }`}
-              >
-                <s.icon className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">{s.label}</span>
-              </button>
-              {i < STEPS.length - 1 && (
-                <div className={`w-6 h-0.5 mx-1 ${s.num < step ? "bg-primary" : "bg-border"}`} />
-              )}
-            </div>
-          ))}
+          {STEPS.map((s, i) => {
+            // For upload-based scans, all manual entry steps (1-3) are effectively complete
+            const isCompleted = isUploadBased ? (s.num <= 4) : (s.num < step);
+            const isCurrent = s.num === step;
+            return (
+              <div key={s.num} className="flex items-center">
+                <button
+                  data-testid={`step-indicator-${s.num}`}
+                  onClick={() => !isUploadBased && goToStep(s.num)}
+                  disabled={isUploadBased && s.num < 4}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all ${
+                    isCurrent
+                      ? "bg-primary text-primary-foreground"
+                      : isCompleted
+                      ? "bg-primary/20 text-primary"
+                      : "bg-secondary text-muted-foreground"
+                  } ${isUploadBased && s.num < 4 ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <s.icon className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">{s.label}</span>
+                </button>
+                {i < STEPS.length - 1 && (
+                  <div className={`w-6 h-0.5 mx-1 ${isCompleted || isCurrent ? "bg-primary" : "bg-border"}`} />
+                )}
+              </div>
+            );
+          })}
         </div>
       </header>
 
