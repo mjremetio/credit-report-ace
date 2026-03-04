@@ -132,71 +132,22 @@ export async function runReportPipeline(
   // Create NegativeAccounts + run violation detection (preserves existing workflow)
   let totalViolations = 0;
 
-  for (const tl of parsedReport.tradelines) {
-    // Only create NegativeAccounts for problematic tradelines (not clean current accounts)
+  // Filter to negative tradelines
+  const negativeTradelines = parsedReport.tradelines.filter(tl => {
+    const flags = parsedReport.issueFlags.filter(f =>
+      f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
+    );
+    return tl.aggregateStatus !== "current" || flags.length > 0 || tl.accountType === "collection";
+  });
+
+  // Step 8a: Create all NegativeAccount records first
+  const accountEntries: Array<{ tl: Tradeline; negAccountId: number }> = [];
+  for (const tl of negativeTradelines) {
     const tradelineFlags = parsedReport.issueFlags.filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
     );
-
-    const isNegative = tl.aggregateStatus !== "current" ||
-      tradelineFlags.length > 0 ||
-      tl.accountType === "collection";
-
-    if (!isNegative) continue;
-
     const accountType = mapAccountType(tl.accountType, tl.aggregateStatus);
-
-    // Build rawDetails with structured evidence + issue flags
-    const flagLines = tradelineFlags.map(f =>
-      `[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`
-    ).join("\n");
-
-    const bureauLines = tl.bureauDetails.map(bd => {
-      // Format payment history if available
-      const payHistStr = (bd.paymentHistory && bd.paymentHistory.length > 0)
-        ? `  Payment History: ${bd.paymentHistory.map(ph => `${ph.month}:${ph.code}`).join(", ")}`
-        : null;
-
-      const fields = [
-        `  Bureau: ${bd.bureau}`,
-        bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
-        bd.balance != null ? `  Balance: $${bd.balance}` : null,
-        bd.status ? `  Status: ${bd.status}` : null,
-        bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
-        bd.dateClosed ? `  Date Closed: ${bd.dateClosed}` : null,
-        bd.lastPaymentDate ? `  Last Payment: ${bd.lastPaymentDate}` : null,
-        bd.lastReportedDate ? `  Last Reported: ${bd.lastReportedDate}` : null,
-        bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
-        bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
-        bd.monthlyPayment != null ? `  Monthly Payment: $${bd.monthlyPayment}` : null,
-        bd.pastDueAmount != null ? `  Past Due Amount: $${bd.pastDueAmount}` : null,
-        bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
-        bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
-        bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
-        bd.terms ? `  Terms: ${bd.terms}` : null,
-        (bd.remarks && bd.remarks.length > 0) ? `  Remarks: ${bd.remarks.join("; ")}` : null,
-        payHistStr,
-      ].filter(Boolean).join("\n");
-      return fields;
-    }).join("\n---\n");
-
-    const rawDetails = [
-      `Creditor: ${tl.creditorName}`,
-      tl.accountNumberMasked ? `Account: ${tl.accountNumberMasked}` : null,
-      `Type: ${tl.accountType}`,
-      `Status: ${tl.aggregateStatus}`,
-      tl.originalCreditor ? `Original Creditor: ${tl.originalCreditor}` : null,
-      tl.balance != null ? `Balance: $${tl.balance}` : null,
-      tl.dates.opened ? `Date Opened: ${tl.dates.opened}` : null,
-      tl.dates.closed ? `Date Closed: ${tl.dates.closed}` : null,
-      tl.dates.firstDelinquency ? `DOFD: ${tl.dates.firstDelinquency}` : null,
-      tl.dates.lastPayment ? `Last Payment: ${tl.dates.lastPayment}` : null,
-      tl.dates.lastReported ? `Last Reported: ${tl.dates.lastReported}` : null,
-      tl.bureaus.length > 0 ? `Bureaus: ${tl.bureaus.join(", ")}` : null,
-      tl.remarks.length > 0 ? `\nRemarks:\n${tl.remarks.map(r => `  - ${r}`).join("\n")}` : null,
-      bureauLines ? `\nPer-Bureau Details:\n${bureauLines}` : null,
-      flagLines ? `\nRule-Based Flags:\n${flagLines}` : null,
-    ].filter(Boolean).join("\n");
+    const rawDetails = buildTradelineRawDetails(tl, tradelineFlags);
 
     const negAccount = await storage.createNegativeAccount({
       scanId: scan.id,
@@ -213,30 +164,51 @@ export async function runReportPipeline(
       workflowStep: "classified",
     });
 
-    // Run AI violation detection — now with pre-computed flags in the rawDetails
-    try {
-      const detected = await detectViolations(negAccount, null);
-      for (const v of detected) {
-        await storage.createViolation({
-          negativeAccountId: negAccount.id,
-          violationType: v.violationType,
-          severity: v.severity,
-          explanation: v.explanation,
-          fcraStatute: v.fcraStatute,
-          evidence: v.evidence || null,
-          matchedRule: v.matchedRule || null,
-          category: v.category || "FCRA_REPORTING",
-          evidenceRequired: v.evidenceRequired || null,
-          evidenceProvided: v.evidenceProvided || false,
-          evidenceNotes: v.evidenceNotes || null,
-          confidence: v.confidence || "possible",
-          croReminder: v.croReminder || null,
-        });
-        totalViolations++;
+    accountEntries.push({ tl, negAccountId: negAccount.id });
+  }
+
+  // Step 8b: Run AI violation detection in parallel batches of 3
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < accountEntries.length; i += BATCH_SIZE) {
+    const batch = accountEntries.slice(i, i + BATCH_SIZE);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async ({ tl, negAccountId }) => {
+        const negAccount = await storage.getNegativeAccount(negAccountId);
+        if (!negAccount) return 0;
+
+        const detected = await detectViolations(negAccount, null);
+        let count = 0;
+        for (const v of detected) {
+          await storage.createViolation({
+            negativeAccountId: negAccount.id,
+            violationType: v.violationType,
+            severity: v.severity,
+            explanation: v.explanation,
+            fcraStatute: v.fcraStatute,
+            evidence: v.evidence || null,
+            matchedRule: v.matchedRule || null,
+            category: v.category || "FCRA_REPORTING",
+            evidenceRequired: v.evidenceRequired || null,
+            evidenceProvided: v.evidenceProvided || false,
+            evidenceNotes: v.evidenceNotes || null,
+            confidence: v.confidence || "possible",
+            croReminder: v.croReminder || null,
+          });
+          count++;
+        }
+        await storage.updateWorkflowStep(negAccount.id, "scanned");
+        return count;
+      })
+    );
+
+    for (let j = 0; j < batchResults.length; j++) {
+      const result = batchResults[j];
+      if (result.status === "fulfilled") {
+        totalViolations += result.value;
+      } else {
+        console.error(`[pipeline] Violation scan failed for ${batch[j].tl.creditorName}:`, result.reason?.message || result.reason);
       }
-      await storage.updateWorkflowStep(negAccount.id, "scanned");
-    } catch (violationErr) {
-      console.error(`[pipeline] Violation scan failed for ${tl.creditorName}:`, violationErr);
     }
   }
 
@@ -247,7 +219,7 @@ export async function runReportPipeline(
     parsedReportId: parsedReportRecord.id,
     consumerName: parsedReport.profile.name,
     parsedReport,
-    accountsCreated: parsedReport.tradelines.length,
+    accountsCreated: accountEntries.length,
     violationsFound: totalViolations,
     issueFlagsDetected: parsedReport.issueFlags.length,
   };
@@ -581,72 +553,26 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
   const parsedReport = parsedReportRecord.reportJson as unknown as ParsedCreditReport;
   if (!parsedReport?.tradelines) throw new Error("Invalid parsed report data");
 
-  console.log(`[violation-pipeline] Running violation detection for scan ${scanId} (${parsedReport.tradelines.length} tradelines)`);
-
-  let totalViolations = 0;
-
-  for (const tl of parsedReport.tradelines) {
+  // Filter to only negative tradelines that need violation analysis
+  const negativeTradelines = parsedReport.tradelines.filter(tl => {
     const tradelineFlags = (parsedReport.issueFlags || []).filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
     );
-
-    const isNegative = tl.aggregateStatus !== "current" ||
+    return tl.aggregateStatus !== "current" ||
       tradelineFlags.length > 0 ||
       tl.accountType === "collection";
+  });
 
-    if (!isNegative) continue;
+  console.log(`[violation-pipeline] Running violation detection for scan ${scanId} (${negativeTradelines.length}/${parsedReport.tradelines.length} negative tradelines)`);
 
+  // Step 1: Create all NegativeAccount records (fast DB operations)
+  const accountEntries: Array<{ tl: Tradeline; negAccountId: number }> = [];
+  for (const tl of negativeTradelines) {
+    const tradelineFlags = (parsedReport.issueFlags || []).filter(f =>
+      f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
+    );
     const accountType = mapAccountType(tl.accountType, tl.aggregateStatus);
-
-    const flagLines = tradelineFlags.map(f =>
-      `[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`
-    ).join("\n");
-
-    const bureauLines = tl.bureauDetails.map(bd => {
-      const payHistStr = (bd.paymentHistory && bd.paymentHistory.length > 0)
-        ? `  Payment History: ${bd.paymentHistory.map(ph => `${ph.month}:${ph.code}`).join(", ")}`
-        : null;
-
-      const fields = [
-        `  Bureau: ${bd.bureau}`,
-        bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
-        bd.balance != null ? `  Balance: $${bd.balance}` : null,
-        bd.status ? `  Status: ${bd.status}` : null,
-        bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
-        bd.dateClosed ? `  Date Closed: ${bd.dateClosed}` : null,
-        bd.lastPaymentDate ? `  Last Payment: ${bd.lastPaymentDate}` : null,
-        bd.lastReportedDate ? `  Last Reported: ${bd.lastReportedDate}` : null,
-        bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
-        bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
-        bd.monthlyPayment != null ? `  Monthly Payment: $${bd.monthlyPayment}` : null,
-        bd.pastDueAmount != null ? `  Past Due Amount: $${bd.pastDueAmount}` : null,
-        bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
-        bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
-        bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
-        bd.terms ? `  Terms: ${bd.terms}` : null,
-        (bd.remarks && bd.remarks.length > 0) ? `  Remarks: ${bd.remarks.join("; ")}` : null,
-        payHistStr,
-      ].filter(Boolean).join("\n");
-      return fields;
-    }).join("\n---\n");
-
-    const rawDetails = [
-      `Creditor: ${tl.creditorName}`,
-      tl.accountNumberMasked ? `Account: ${tl.accountNumberMasked}` : null,
-      `Type: ${tl.accountType}`,
-      `Status: ${tl.aggregateStatus}`,
-      tl.originalCreditor ? `Original Creditor: ${tl.originalCreditor}` : null,
-      tl.balance != null ? `Balance: $${tl.balance}` : null,
-      tl.dates.opened ? `Date Opened: ${tl.dates.opened}` : null,
-      tl.dates.closed ? `Date Closed: ${tl.dates.closed}` : null,
-      tl.dates.firstDelinquency ? `DOFD: ${tl.dates.firstDelinquency}` : null,
-      tl.dates.lastPayment ? `Last Payment: ${tl.dates.lastPayment}` : null,
-      tl.dates.lastReported ? `Last Reported: ${tl.dates.lastReported}` : null,
-      tl.bureaus.length > 0 ? `Bureaus: ${tl.bureaus.join(", ")}` : null,
-      tl.remarks.length > 0 ? `\nRemarks:\n${tl.remarks.map(r => `  - ${r}`).join("\n")}` : null,
-      bureauLines ? `\nPer-Bureau Details:\n${bureauLines}` : null,
-      flagLines ? `\nRule-Based Flags:\n${flagLines}` : null,
-    ].filter(Boolean).join("\n");
+    const rawDetails = buildTradelineRawDetails(tl, tradelineFlags);
 
     const negAccount = await storage.createNegativeAccount({
       scanId,
@@ -663,45 +589,68 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
       workflowStep: "classified",
     });
 
-    try {
-      const detected = await detectViolations(negAccount, scan.clientState || null);
-      for (const v of detected) {
-        await storage.createViolation({
-          negativeAccountId: negAccount.id,
-          violationType: v.violationType,
-          severity: v.severity,
-          explanation: v.explanation,
-          fcraStatute: v.fcraStatute,
-          evidence: v.evidence || null,
-          matchedRule: v.matchedRule || null,
-          category: v.category || "FCRA_REPORTING",
-          evidenceRequired: v.evidenceRequired || null,
-          evidenceProvided: v.evidenceProvided || false,
-          evidenceNotes: v.evidenceNotes || null,
-          confidence: v.confidence || "possible",
-          croReminder: v.croReminder || null,
-        });
-        totalViolations++;
+    accountEntries.push({ tl, negAccountId: negAccount.id });
+  }
+
+  // Step 2: Run AI violation detection in parallel batches of 3
+  const BATCH_SIZE = 3;
+  let totalViolations = 0;
+  let processedCount = 0;
+
+  for (let i = 0; i < accountEntries.length; i += BATCH_SIZE) {
+    const batch = accountEntries.slice(i, i + BATCH_SIZE);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async ({ tl, negAccountId }) => {
+        const negAccount = await storage.getNegativeAccount(negAccountId);
+        if (!negAccount) return 0;
+
+        const detected = await detectViolations(negAccount, scan.clientState || null);
+        let count = 0;
+        for (const v of detected) {
+          await storage.createViolation({
+            negativeAccountId: negAccount.id,
+            violationType: v.violationType,
+            severity: v.severity,
+            explanation: v.explanation,
+            fcraStatute: v.fcraStatute,
+            evidence: v.evidence || null,
+            matchedRule: v.matchedRule || null,
+            category: v.category || "FCRA_REPORTING",
+            evidenceRequired: v.evidenceRequired || null,
+            evidenceProvided: v.evidenceProvided || false,
+            evidenceNotes: v.evidenceNotes || null,
+            confidence: v.confidence || "possible",
+            croReminder: v.croReminder || null,
+          });
+          count++;
+        }
+        await storage.updateWorkflowStep(negAccount.id, "scanned");
+        return count;
+      })
+    );
+
+    for (let j = 0; j < batchResults.length; j++) {
+      const result = batchResults[j];
+      processedCount++;
+      if (result.status === "fulfilled") {
+        totalViolations += result.value;
+      } else {
+        console.error(`[violation-pipeline] Violation scan failed for ${batch[j].tl.creditorName}:`, result.reason?.message || result.reason);
       }
-      await storage.updateWorkflowStep(negAccount.id, "scanned");
-    } catch (violationErr) {
-      console.error(`[violation-pipeline] Violation scan failed for ${tl.creditorName}:`, violationErr);
     }
+
+    console.log(`[violation-pipeline] Progress: ${processedCount}/${accountEntries.length} accounts processed`);
   }
 
   // Update scan step to indicate violations are done
   await storage.updateScanStep(scanId, 4);
 
-  console.log(`[violation-pipeline] Complete: ${totalViolations} violations detected`);
+  console.log(`[violation-pipeline] Complete: ${totalViolations} violations detected across ${accountEntries.length} accounts`);
 
   return {
     scanId,
-    accountsCreated: parsedReport.tradelines.filter(tl => {
-      const flags = (parsedReport.issueFlags || []).filter(f =>
-        f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
-      );
-      return tl.aggregateStatus !== "current" || flags.length > 0 || tl.accountType === "collection";
-    }).length,
+    accountsCreated: accountEntries.length,
     violationsFound: totalViolations,
   };
 }
@@ -961,4 +910,57 @@ function mapManualStatus(typeOrStatus: string | null): AccountStatus {
   if (s.includes("settled")) return "settled";
   if (s.includes("closed")) return "closed";
   return "derogatory";
+}
+
+/** Build rawDetails string for a tradeline (used by both report and violation pipelines) */
+function buildTradelineRawDetails(tl: Tradeline, tradelineFlags: IssueFlag[]): string {
+  const flagLines = tradelineFlags.map(f =>
+    `[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`
+  ).join("\n");
+
+  const bureauLines = tl.bureauDetails.map(bd => {
+    const payHistStr = (bd.paymentHistory && bd.paymentHistory.length > 0)
+      ? `  Payment History: ${bd.paymentHistory.map(ph => `${ph.month}:${ph.code}`).join(", ")}`
+      : null;
+
+    const fields = [
+      `  Bureau: ${bd.bureau}`,
+      bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
+      bd.balance != null ? `  Balance: $${bd.balance}` : null,
+      bd.status ? `  Status: ${bd.status}` : null,
+      bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
+      bd.dateClosed ? `  Date Closed: ${bd.dateClosed}` : null,
+      bd.lastPaymentDate ? `  Last Payment: ${bd.lastPaymentDate}` : null,
+      bd.lastReportedDate ? `  Last Reported: ${bd.lastReportedDate}` : null,
+      bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
+      bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
+      bd.monthlyPayment != null ? `  Monthly Payment: $${bd.monthlyPayment}` : null,
+      bd.pastDueAmount != null ? `  Past Due Amount: $${bd.pastDueAmount}` : null,
+      bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
+      bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
+      bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
+      bd.terms ? `  Terms: ${bd.terms}` : null,
+      (bd.remarks && bd.remarks.length > 0) ? `  Remarks: ${bd.remarks.join("; ")}` : null,
+      payHistStr,
+    ].filter(Boolean).join("\n");
+    return fields;
+  }).join("\n---\n");
+
+  return [
+    `Creditor: ${tl.creditorName}`,
+    tl.accountNumberMasked ? `Account: ${tl.accountNumberMasked}` : null,
+    `Type: ${tl.accountType}`,
+    `Status: ${tl.aggregateStatus}`,
+    tl.originalCreditor ? `Original Creditor: ${tl.originalCreditor}` : null,
+    tl.balance != null ? `Balance: $${tl.balance}` : null,
+    tl.dates.opened ? `Date Opened: ${tl.dates.opened}` : null,
+    tl.dates.closed ? `Date Closed: ${tl.dates.closed}` : null,
+    tl.dates.firstDelinquency ? `DOFD: ${tl.dates.firstDelinquency}` : null,
+    tl.dates.lastPayment ? `Last Payment: ${tl.dates.lastPayment}` : null,
+    tl.dates.lastReported ? `Last Reported: ${tl.dates.lastReported}` : null,
+    tl.bureaus.length > 0 ? `Bureaus: ${tl.bureaus.join(", ")}` : null,
+    tl.remarks.length > 0 ? `\nRemarks:\n${tl.remarks.map(r => `  - ${r}`).join("\n")}` : null,
+    bureauLines ? `\nPer-Bureau Details:\n${bureauLines}` : null,
+    flagLines ? `\nRule-Based Flags:\n${flagLines}` : null,
+  ].filter(Boolean).join("\n");
 }
