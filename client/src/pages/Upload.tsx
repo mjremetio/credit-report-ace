@@ -373,7 +373,7 @@ export default function Upload() {
                   onChange={(e) => setRawText(e.target.value)}
                   rows={14}
                   placeholder={"Paste credit report text here...\n\ne.g.\nConsumer: John Doe\nSSN: XXX-XX-1234\nTransUnion Score: 620\nExperian Score: 635\nEquifax Score: 610\n\nACCOUNT INFORMATION\nCreditor: ABC Collections\nAccount#: ****5678\nType: Collection\nBalance: $1,250\n..."}
-                  className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/30 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
+                  className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/30 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
                   spellCheck={false}
                 />
 
@@ -520,7 +520,7 @@ export default function Upload() {
                   setIsEdited(true);
                 }}
                 rows={20}
-                className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
+                className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
                 spellCheck={false}
               />
 
@@ -1065,7 +1065,7 @@ export default function Upload() {
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
-              className="bg-[#0a0a0c] border border-border rounded-lg p-4 font-mono text-xs text-muted-foreground max-h-48 overflow-y-auto"
+              className="bg-secondary border border-border rounded-lg p-4 font-mono text-xs text-muted-foreground max-h-48 overflow-y-auto"
               data-testid="terminal-logs"
             >
               {logs.map((log, i) => (

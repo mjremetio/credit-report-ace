@@ -1,30 +1,19 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
-  Plus, Trash2, ChevronRight, Shield,
-  Loader2, User, CheckCircle2, Eye
+  Trash2, ChevronRight, Shield,
+  Loader2, User, CheckCircle2, Eye, UploadCloud
 } from "lucide-react";
-import { fetchScans, createScan, deleteScan } from "@/lib/api";
+import { fetchScans, deleteScan } from "@/lib/api";
 
 export default function Home() {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
-  const [showNewScan, setShowNewScan] = useState(false);
-  const [consumerName, setConsumerName] = useState("");
 
   const { data: scans = [], isLoading } = useQuery({
     queryKey: ["scans"],
     queryFn: fetchScans,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (name: string) => createScan(name),
-    onSuccess: (scan) => {
-      queryClient.invalidateQueries({ queryKey: ["scans"] });
-      navigate(`/scan/${scan.id}`);
-    },
   });
 
   const deleteMutation = useMutation({
@@ -32,77 +21,22 @@ export default function Home() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scans"] }),
   });
 
-  const handleCreate = () => {
-    if (consumerName.trim()) {
-      createMutation.mutate(consumerName.trim());
-    }
-  };
-
   const stepLabels = ["Start", "Add Accounts", "Classify", "Next Steps"];
 
   return (
     <div className="h-full">
       <header className="h-16 border-b border-border bg-white flex items-center px-6 justify-between">
         <h2 className="font-display font-medium text-lg text-foreground">Dispute Scanner</h2>
-        <button
-          data-testid="button-new-scan"
-          onClick={() => setShowNewScan(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors text-sm"
-        >
-          <Plus className="w-4 h-4" />
-          New Scan
-        </button>
       </header>
 
       <div className="p-6">
-        <AnimatePresence>
-          {showNewScan && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mb-8 bg-card border border-primary/30 rounded-xl p-6"
-            >
-              <h3 className="font-display text-lg text-foreground mb-4">Start New Dispute Scan</h3>
-              <div className="flex gap-3">
-                <input
-                  data-testid="input-consumer-name"
-                  type="text"
-                  value={consumerName}
-                  onChange={(e) => setConsumerName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                  placeholder="Enter your full name..."
-                  className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  autoFocus
-                />
-                <button
-                  data-testid="button-create-scan"
-                  onClick={handleCreate}
-                  disabled={!consumerName.trim() || createMutation.isPending}
-                  className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
-                  Begin Scan
-                </button>
-                <button
-                  data-testid="button-cancel-scan"
-                  onClick={() => { setShowNewScan(false); setConsumerName(""); }}
-                  className="px-4 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {isLoading && (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="w-6 h-6 animate-spin text-primary" />
           </div>
         )}
 
-        {!isLoading && scans.length === 0 && !showNewScan && (
+        {!isLoading && scans.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -113,15 +47,15 @@ export default function Home() {
             </div>
             <h2 className="font-display text-2xl text-foreground mb-3">No Active Scans</h2>
             <p className="text-muted-foreground text-sm max-w-md mx-auto mb-8">
-              Create a scan to enter and analyze negative credit accounts for potential FCRA violations.
+              Upload a credit report to start analyzing negative accounts for potential FCRA violations.
             </p>
             <button
-              data-testid="button-empty-new-scan"
-              onClick={() => setShowNewScan(true)}
+              data-testid="button-go-to-upload"
+              onClick={() => navigate("/upload")}
               className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
             >
-              <Plus className="w-4 h-4" />
-              Start Your First Scan
+              <UploadCloud className="w-4 h-4" />
+              Upload a Report
             </button>
           </motion.div>
         )}
