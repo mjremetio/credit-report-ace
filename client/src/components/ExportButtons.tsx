@@ -1,13 +1,12 @@
 import { useState } from "react";
-import { FileText, Download, Lock, Loader2 } from "lucide-react";
+import { FileText, Download, Loader2 } from "lucide-react";
 import { exportPdf, exportCsv } from "@/lib/api";
 
 interface ExportButtonsProps {
   scanId: number;
-  isApproved: boolean;
 }
 
-export default function ExportButtons({ scanId, isApproved }: ExportButtonsProps) {
+export default function ExportButtons({ scanId }: ExportButtonsProps) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,16 +55,10 @@ export default function ExportButtons({ scanId, isApproved }: ExportButtonsProps
       <div className="flex gap-3">
         <button
           onClick={handleExportPdf}
-          disabled={!isApproved || exportingPdf}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
-            isApproved
-              ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
-              : "bg-secondary border border-border text-muted-foreground cursor-not-allowed"
-          }`}
+          disabled={exportingPdf}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
         >
-          {!isApproved ? (
-            <Lock className="w-4 h-4" />
-          ) : exportingPdf ? (
+          {exportingPdf ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
             <FileText className="w-4 h-4" />
@@ -75,16 +68,10 @@ export default function ExportButtons({ scanId, isApproved }: ExportButtonsProps
 
         <button
           onClick={handleExportCsv}
-          disabled={!isApproved || exportingCsv}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
-            isApproved
-              ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
-              : "bg-secondary border border-border text-muted-foreground cursor-not-allowed"
-          }`}
+          disabled={exportingCsv}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
         >
-          {!isApproved ? (
-            <Lock className="w-4 h-4" />
-          ) : exportingCsv ? (
+          {exportingCsv ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
             <Download className="w-4 h-4" />
@@ -92,13 +79,6 @@ export default function ExportButtons({ scanId, isApproved }: ExportButtonsProps
           Export CSV
         </button>
       </div>
-
-      {!isApproved && (
-        <p className="text-xs font-mono text-muted-foreground flex items-center gap-1.5">
-          <Lock className="w-3 h-3" />
-          Complete review to enable export.
-        </p>
-      )}
 
       {error && (
         <p className="text-xs font-mono text-destructive">{error}</p>

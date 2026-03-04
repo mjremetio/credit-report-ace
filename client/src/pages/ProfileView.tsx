@@ -314,22 +314,22 @@ function ViolationProfileCard({ violation }: { violation: any }) {
     <div data-testid={`profile-violation-${violation.id}`} className="bg-card border border-border rounded-lg p-4">
       <div className="flex items-center gap-3 mb-2 flex-wrap">
         <SeverityBadge severity={violation.severityOverride || violation.severity} />
-        <span className="text-sm text-foreground font-medium">{violation.violationType}</span>
+        <span className="text-sm text-foreground font-semibold">{violation.violationType}</span>
         {violation.confidence && (
           <ConfidenceBadge confidence={violation.confidence} />
         )}
         {violation.reviewStatus && violation.reviewStatus !== "pending" && (
           <ReviewStatusBadge status={violation.reviewStatus} />
         )}
-        <span className="text-xs font-mono text-muted-foreground ml-auto">{violation.creditor}</span>
+        <span className="text-sm font-mono text-foreground/60 ml-auto">{violation.creditor}</span>
       </div>
-      <p className="text-xs font-mono text-muted-foreground">
+      <p className="text-sm font-mono text-foreground/80 leading-relaxed">
         {violation.descriptionOverride || violation.explanation}
       </p>
-      <div className="mt-1 flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-mono text-primary">{violation.fcraStatute}</span>
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-mono font-medium text-primary">{violation.fcraStatute}</span>
         {violation.matchedRule && (
-          <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{violation.matchedRule}</span>
+          <span className="text-xs font-mono text-foreground/70 bg-secondary px-2 py-1 rounded">{violation.matchedRule}</span>
         )}
       </div>
     </div>
@@ -357,7 +357,7 @@ function SeverityBadge({ severity }: { severity: string }) {
     low: "bg-blue-500/20 text-blue-500 border-blue-500/30",
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono border ${colors[severity] || colors.medium}`}>
+    <span className={`px-2.5 py-1 rounded text-xs uppercase font-mono font-semibold border ${colors[severity] || colors.medium}`}>
       {severity}
     </span>
   );
@@ -370,7 +370,7 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
     possible: "border-orange-500/30 text-orange-600 bg-orange-500/10",
   };
   return (
-    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colors[confidence] || "border-border text-muted-foreground"}`}>
+    <span className={`text-xs font-mono font-medium px-2 py-0.5 rounded border ${colors[confidence] || "border-border text-muted-foreground"}`}>
       {confidence}
     </span>
   );
@@ -386,7 +386,7 @@ function ReviewStatusBadge({ status }: { status: string }) {
   };
   const info = map[status] || map.pending;
   return (
-    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${info.color}`}>
+    <span className={`text-xs font-mono font-medium px-2.5 py-1 rounded border ${info.color}`}>
       {info.label}
     </span>
   );
