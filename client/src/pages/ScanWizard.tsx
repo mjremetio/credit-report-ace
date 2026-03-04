@@ -594,6 +594,8 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const unscannedCount = negAccounts.filter((a: any) => a.workflowStep !== "scanned").length;
   const totalViolationCount = negAccounts.reduce((sum: number, a: any) => sum + (a.violations?.length || 0), 0);
   const allScanned = unscannedCount === 0 && negAccounts.length > 0;
+  const hasParsedReport = scan.hasParsedReport || false;
+  const analysisComplete = allScanned || pipelineResult;
 
   // Group violations by category
   const fcraViolations = negAccounts.flatMap((a: any) =>
@@ -611,23 +613,34 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         <div className="space-y-2 text-xs font-mono">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-            <span className="text-muted-foreground">Manual data entry — {negAccounts.length} account(s) added</span>
+            <span className="text-muted-foreground">
+              {hasParsedReport
+                ? `Report uploaded & structured — ${negAccounts.length} account(s) detected`
+                : `Manual data entry — ${negAccounts.length} account(s) added`}
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            {(allScanned || pipelineResult) ? (
+            {analysisComplete ? (
               <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
             ) : pipelineRunning ? (
               <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
             ) : (
               <Activity className="w-4 h-4 text-primary flex-shrink-0" />
             )}
-            <span className={allScanned || pipelineResult ? "text-muted-foreground" : "text-primary"}>
-              Convert into Structured JSON & AI violation analysis
+            <span className={analysisComplete ? "text-muted-foreground" : "text-primary"}>
+              {hasParsedReport ? "Structured JSON & AI violation analysis" : "Convert into Structured JSON & AI violation analysis"}
+              {analysisComplete && totalViolationCount > 0 ? ` — ${totalViolationCount} violation(s) found` : ""}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <ClipboardCheck className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
-            <span className="text-muted-foreground/50">Paralegal manual review — Edit analysis reports</span>
+            {analysisComplete ? (
+              <ClipboardCheck className="w-4 h-4 text-primary flex-shrink-0" />
+            ) : (
+              <ClipboardCheck className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
+            )}
+            <span className={analysisComplete ? "text-primary" : "text-muted-foreground/50"}>
+              Paralegal manual review — Edit analysis reports
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
@@ -660,15 +673,37 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
       )}
 
+      {/* Analysis complete banner (for upload-generated scans where pipelineResult isn't set) */}
+      {!pipelineResult && allScanned && hasParsedReport && totalViolationCount > 0 && (
+        <div className="mb-6 bg-green-500/5 border border-green-500/30 rounded-xl p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <h4 className="font-display text-foreground text-sm">Upload Analysis Complete</h4>
+          </div>
+          <div className="grid grid-cols-2 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-display text-foreground">{negAccounts.length}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Accounts</div>
+            </div>
+            <div>
+              <div className="text-2xl font-display text-foreground">{totalViolationCount}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Violations</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-8 flex items-start justify-between">
         <div>
           <h2 className="font-display text-2xl text-foreground mb-2">Analyze & Review</h2>
           <p className="text-muted-foreground font-mono text-sm">
-            Convert manual entries to structured JSON and run AI violation analysis, or scan individual accounts.
+            {analysisComplete
+              ? "Analysis complete. Review violations below, then proceed to paralegal review."
+              : "Convert manual entries to structured JSON and run AI violation analysis, or scan individual accounts."}
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          {!pipelineResult && (
+          {!pipelineResult && !allScanned && (
             <button
               data-testid="button-run-pipeline"
               onClick={handleRunPipeline}
