@@ -101,6 +101,8 @@ export const violations = pgTable("violations", {
   descriptionOverride: text("description_override"),
   reviewedAt: timestamp("reviewed_at"),
   reviewedBy: text("reviewed_by"),
+  // Paralegal notes
+  paralegalNotes: text("paralegal_notes"),
 });
 
 // ── Parsed Credit Report (system of record JSON) ──────────────────

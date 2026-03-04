@@ -119,37 +119,47 @@ When per-bureau data is provided, you MUST compare data across ALL reporting bur
 - Use the "Cross-Bureau Comparison" section as a quick reference, then verify with per-bureau details
 - For payment history, compare month-by-month codes across bureaus — differences indicate furnisher error
 
-COMMON DEBT COLLECTOR VIOLATIONS TO CHECK:
+COMMON DEBT COLLECTOR VIOLATIONS TO CHECK — WHAT TO LOOK FOR:
 
 1. DEBT_COLLECTOR_DISCLOSURE (High) — Failure to Disclose Debt Collector Status
-   If a debt collector sends letters, emails, text messages, or voicemails and does NOT clearly state that they are attempting to collect a debt or that the communication is from a debt collector, this is a strong violation. Written disclosure failures ("mini-Miranda") are especially actionable.
+   If a debt collector sends letters, emails, text messages, or voicemails and does NOT clearly state that they are attempting to collect a debt or that the communication is from a debt collector, this MUST be flagged. Written disclosure failures ("mini-Miranda") are STRONG violations. The required disclosure language is: "This is an attempt to collect a debt and any information obtained will be used for that purpose" or equivalent. Check ALL forms of communication — letters, emails, texts, voicemails. Each communication without this disclosure is a separate violation.
    Evidence needed: Letters, emails, texts, voicemail transcripts that lack disclosure language.
+   FDCPA Reference: §807(11) — False or misleading representation / failure to disclose.
 
 2. CA_LICENSE_MISSING (High) — California License Number (CALIFORNIA ONLY)
-   For California residents, if a debt collector sends ANY correspondence and fails to include their California debt collector license number, flag this. ONLY apply when client state is CA.
+   For California residents, if a debt collector sends ANY correspondence and fails to include their California debt collector license number, flag this. This applies ONLY to California clients (client state = CA). Every piece of correspondence must include the license number.
    Evidence needed: Correspondence missing license number.
+   Reference: California Civil Code §1788.11(e).
 
 3. CEASE_CONTACT_VIOLATION (Critical) — Continued Contact After Written Stop Request
-   If a client sent written notice instructing the collector to stop contacting them, and the collector continued communicating AFTER receiving that notice, this is a critical violation. Confirm ALL THREE elements: (1) written request was sent, (2) proof it was received, (3) contact continued afterward.
-   Evidence needed: Stop letter, delivery/receipt proof, subsequent contact documentation.
+   If a client sent WRITTEN notice instructing the collector to stop contacting them and the collector continued communicating AFTER receiving that notice, this MUST be flagged. This is a CRITICAL violation. Confirm ALL THREE elements: (1) written request was sent, (2) proof it was received (certified mail receipt, delivery confirmation, read receipt), (3) contact continued afterward. Even a single contact after receipt of the written stop request is a violation.
+   Evidence needed: Copy of stop letter, delivery/receipt proof (certified mail receipt), subsequent contact documentation (calls, letters, texts after receipt date).
+   FDCPA Reference: §805(c) — Ceasing communication.
 
 4. INCONVENIENT_CONTACT (High) — Inconvenient Time or Workplace Contact
-   If during a recorded call the client states they are at work or that it is not a convenient time, and the collector continues the conversation or continues calling at that time/place, flag this. Calls before 8 AM or after 9 PM are per se violations.
-   Evidence needed: Recorded calls with timestamps, call logs.
+   If during a RECORDED call the client states they are at work or that it is not a convenient time, and the collector continues the conversation or continues calling at that time/place, this MUST be flagged. Calls before 8:00 AM or after 9:00 PM in the consumer's local time zone are per se violations regardless of what was said. Workplace calls after the employer has been known to prohibit them are also violations. RECORDED CALLS are required evidence for this type of violation.
+   Evidence needed: Recorded calls with timestamps, call logs showing time of calls.
+   FDCPA Reference: §805(a)(1) — Communicating at unusual time or place.
 
 5. THIRD_PARTY_DISCLOSURE (Critical) — Third-Party Contact
-   If a debt collector contacts a spouse, family member, employer, or friend and discloses the existence of the debt, this is a critical violation. Collectors may NOT disclose debt information to third parties.
-   Evidence needed: Third-party statements, call logs to non-debtor numbers, misdirected correspondence.
+   If a debt collector contacts a spouse, family member, employer, or friend and DISCLOSES the existence of the debt, this is a CRITICAL violation. Collectors may contact third parties ONLY to obtain location information about the consumer, and may NOT disclose that a debt is owed. Disclosure to ANY third party (spouse, parent, child, employer, neighbor, friend) constitutes a violation.
+   Evidence needed: Third-party statements/declarations, call logs showing calls to non-debtor phone numbers, misdirected correspondence, text messages sent to wrong person.
+   FDCPA Reference: §805(b) — Communication with third parties.
 
 6. HARASSMENT_EXCESSIVE_CALLS (High) — Excessive or Harassing Calls
-   Look for: 7+ calls in 7 days (CFPB Reg F threshold), 3+ calls same day, back-to-back calls, repeated calls without response, aggressive/threatening tone or language. Call log screenshots can help support this type of violation.
-   Evidence needed: Call logs, call history screenshots, recordings.
+   Look for: 7+ calls in 7 days to a particular phone number about a specific debt (CFPB Reg F presumption of harassment), 3+ calls same day, back-to-back calls within minutes, repeated calls without leaving a message or response, aggressive/threatening tone or language. Call log screenshots are critical evidence. Also flag: calls intended to annoy or harass, use of obscene language, threats of violence, publishing debtor lists.
+   Evidence needed: Call logs with dates/times, call history screenshots, recordings of threatening or harassing calls.
+   FDCPA Reference: §806 — Harassment or abuse, CFPB Regulation F §1006.14(b).
 
-## CRO REMINDER — MANDATORY for EVERY debt collector account:
+## CRO REMINDER — MANDATORY CHECKLIST FOR EVERY DEBT COLLECTOR ACCOUNT:
 When reviewing ANY debt collector account, the CRO analyst MUST follow this checklist:
 • Always ask about ALL communication activity — calls, letters, texts, emails, voicemails
 • Always request COPIES of ALL letters, texts, emails, and voicemails received from the collector
 • Always ask about recorded calls — recorded calls are CRITICAL evidence for violations
+• Always ask: "Did you send a written stop/cease request? If so, did you keep a copy and proof of delivery?"
+• Always ask: "Has the collector contacted anyone else about this debt — spouse, family, friends, employer?"
+• Always ask: "How many times per day/week does the collector call? Do they call before 8 AM or after 9 PM?"
+• Always ask: "Have you ever told the collector you were at work or it was an inconvenient time?"
 • Strong violations REQUIRE supporting documentation before they can be escalated
 • If documentation supports the violation, ESCALATE for review immediately
 • Include a specific "cro_reminder" in EVERY violation returned for debt collector accounts
@@ -185,7 +195,7 @@ Return ONLY valid JSON:
   ]
 }
 
-Be thorough but precise. Only flag genuine potential issues. If the account details are sparse, focus on what can be determined from the available information.
+Be thorough but precise. Only flag genuine potential issues. If the account details are sparse, focus on what can be determined from the available information. For debt collector/collection accounts, ALWAYS generate violations that prompt the CRO to investigate communications even if no specific evidence is in the report data — the purpose is to drive the CRO to ASK the client and COLLECT documentation.
 
 ANALYSIS CHECKLIST — For EVERY account, systematically check:
 1. **Balance accuracy**: paid/settled with balance >$0, cross-bureau balance mismatch, post-bankruptcy balance, balance > high balance
@@ -196,6 +206,14 @@ ANALYSIS CHECKLIST — For EVERY account, systematically check:
 6. **Payment history alignment**: grid matches reported status, consecutive late payments (stacking/re-aging), cross-bureau payment history differences
 7. **Remarks analysis**: Look for dispute remarks (inconsistent across bureaus?), bankruptcy remarks (balance should be $0), collection indicators
 8. **High balance / credit limit**: balance exceeds high balance on charge-offs, missing credit limit on revolving accounts
+
+DEBT COLLECTOR SPECIFIC CHECKLIST — For EVERY debt_collection account, ALWAYS check:
+9. **Mini-Miranda disclosure**: Flag that CRO must verify all written communications include proper disclosure language — this is the #1 most commonly missed violation
+10. **California license number**: If client state is CA, flag that all correspondence must include CA debt collector license number
+11. **Cease contact compliance**: Flag that CRO must ask if client sent a written stop request and if contact continued
+12. **Inconvenient time/workplace calls**: Flag that CRO must ask about call timing and whether client said they were at work
+13. **Third-party disclosure**: Flag that CRO must ask if collector contacted anyone else about the debt
+14. **Excessive/harassing calls**: Flag that CRO must ask about call frequency, call logs, threatening language
 
 For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector conduct violations, use the specific category name (DEBT_COLLECTOR_DISCLOSURE, CA_LICENSE_MISSING, CEASE_CONTACT_VIOLATION, INCONVENIENT_CONTACT, THIRD_PARTY_DISCLOSURE, HARASSMENT_EXCESSIVE_CALLS).`;
 
@@ -256,6 +274,21 @@ function buildAccountDescription(account: NegativeAccount, clientState?: string 
   if (account.status) lines.push(`Aggregate Status: ${account.status}`);
   if (account.bureaus) lines.push(`Reporting Bureaus: ${account.bureaus}`);
   if (clientState) lines.push(`Client State: ${clientState}`);
+
+  // ── Debt Collector Context ──
+  if (account.accountType === "debt_collection") {
+    lines.push("");
+    lines.push("═══ DEBT COLLECTOR ANALYSIS CONTEXT ═══");
+    lines.push("This is a DEBT COLLECTION account. Per FDCPA, the following MUST be investigated:");
+    lines.push("1. ALL written communications (letters, emails, texts) must include mini-Miranda disclosure");
+    if (clientState && clientState.toUpperCase() === "CA") {
+      lines.push("2. Client is in CALIFORNIA — ALL correspondence must include CA debt collector license number");
+    }
+    lines.push(`${clientState?.toUpperCase() === "CA" ? "3" : "2"}. Check if client sent written cease/stop contact request`);
+    lines.push(`${clientState?.toUpperCase() === "CA" ? "4" : "3"}. Check if collector contacted third parties (spouse, family, employer, friends)`);
+    lines.push(`${clientState?.toUpperCase() === "CA" ? "5" : "4"}. Check call frequency for harassment (7+ calls/7 days or 3+/day)`);
+    lines.push(`${clientState?.toUpperCase() === "CA" ? "6" : "5"}. Check call timing (before 8AM/after 9PM) and workplace calls`);
+  }
 
   // ── Parse rawDetails for structured per-bureau data ──
   // The rawDetails field contains rich per-bureau information built by buildTradelineRawDetails()

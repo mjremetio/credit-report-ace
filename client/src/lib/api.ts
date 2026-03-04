@@ -309,6 +309,17 @@ export async function reviewViolation(violationId: number, data: {
   severityOverride?: string | null;
   descriptionOverride?: string | null;
   reviewedBy?: string | null;
+  // Paralegal editable fields
+  explanation?: string | null;
+  evidence?: string | null;
+  fcraStatute?: string | null;
+  evidenceRequired?: string | null;
+  evidenceProvided?: boolean | null;
+  evidenceNotes?: string | null;
+  confidence?: string | null;
+  croReminder?: string | null;
+  category?: string | null;
+  paralegalNotes?: string | null;
 }) {
   const res = await fetch(`/api/violations/${violationId}/review`, {
     method: "PATCH",
@@ -318,6 +329,19 @@ export async function reviewViolation(violationId: number, data: {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to review violation");
+  }
+  return res.json();
+}
+
+export async function editViolation(violationId: number, data: Record<string, any>) {
+  const res = await fetch(`/api/violations/${violationId}/edit`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to edit violation");
   }
   return res.json();
 }

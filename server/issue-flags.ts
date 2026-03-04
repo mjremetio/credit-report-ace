@@ -41,7 +41,7 @@ function flag(
 
 // ── Core rule engine ───────────────────────────────────────────────
 
-export function computeIssueFlags(report: ParsedCreditReport): IssueFlag[] {
+export function computeIssueFlags(report: ParsedCreditReport, clientState?: string | null): IssueFlag[] {
   const flags: IssueFlag[] = [];
 
   for (const tl of report.tradelines) {
@@ -59,7 +59,7 @@ export function computeIssueFlags(report: ParsedCreditReport): IssueFlag[] {
     flags.push(...checkMissingCreditLimit(tl));
     flags.push(...checkMissingOriginalCreditor(tl));
     flags.push(...checkPaymentGridStatusConflict(tl));
-    flags.push(...checkDebtCollectorViolations(tl));
+    flags.push(...checkDebtCollectorViolations(tl, clientState));
   }
 
   for (const pr of report.publicRecords) {
@@ -578,7 +578,7 @@ function checkPublicRecordFlags(pr: PublicRecord, tradelines: Tradeline[]): Issu
 // The full FDCPA analysis requires client documentation (letters, call logs),
 // but we can flag collection accounts that warrant CRO investigation.
 
-function checkDebtCollectorViolations(tl: Tradeline): IssueFlag[] {
+function checkDebtCollectorViolations(tl: Tradeline, clientState?: string | null): IssueFlag[] {
   const flags: IssueFlag[] = [];
 
   // Only check collection-type accounts
@@ -588,51 +588,76 @@ function checkDebtCollectorViolations(tl: Tradeline): IssueFlag[] {
 
   if (!isCollector) return flags;
 
-  // FLAG: Debt collector account detected — CRO should investigate communications
+  // FLAG 1: Debt collector account detected — CRO MUST investigate communications
   flags.push(flag(
     "DEBT_COLLECTOR_ACCOUNT",
     "medium",
     tl.creditorName,
-    `Debt collector account detected. CRO must ask about: (1) all letters/emails/texts received, (2) voicemails, (3) recorded calls, (4) whether mini-Miranda disclosure was included, (5) whether client sent written stop request`,
+    `Debt collector account detected. CRO MUST investigate: (1) all letters/emails/texts received — check for mini-Miranda disclosure, (2) all voicemails received, (3) any recorded calls, (4) whether client sent written cease/stop contact request, (5) whether collector contacted any third parties, (6) call frequency and timing`,
     tl.bureaus,
     { accountType: tl.accountType, status: tl.aggregateStatus },
-    "Request all communication documentation from client — letters, texts, emails, voicemails, call logs",
+    "CRO: Ask client about ALL communication from this collector — letters, texts, emails, voicemails, phone calls. Request copies of everything. Ask specifically: Did you send a written stop request? Has the collector contacted anyone else? How often do they call? What time do they call?",
   ));
 
-  // FLAG: Check for mini-Miranda disclosure failure indicators in remarks
+  // FLAG 2: Mini-Miranda / Debt Collector Disclosure check
+  // Per FDCPA §807(11), every communication must include disclosure that it's from a debt collector
   const hasDisclosureRemark = tl.remarks.some(r =>
     /mini.?miranda|debt\s+collector\s+disclosure|this\s+is\s+an\s+attempt\s+to\s+collect/i.test(r)
   );
-  // If no disclosure language found in remarks but it's a collection, flag for investigation
   if (!hasDisclosureRemark) {
     flags.push(flag(
       "DEBT_COLLECTOR_DISCLOSURE_CHECK",
       "high",
       tl.creditorName,
-      `Collection account — verify all written communications include mini-Miranda disclosure ("This is an attempt to collect a debt and any information obtained will be used for that purpose")`,
+      `Collection account — CRO must verify ALL written communications from "${tl.creditorName}" include the required mini-Miranda disclosure: "This is an attempt to collect a debt and any information obtained will be used for that purpose." Written disclosure failures are STRONG, actionable violations. Check every letter, email, text message, and voicemail.`,
       tl.bureaus,
       { creditor: tl.creditorName, hasDisclosureRemark: "no" },
-      "FDCPA §807(11) — Request all letters, emails, texts, voicemails from client to check for disclosure language",
+      "CRO: Request ALL letters, emails, texts, voicemails from this collector. Check each one for mini-Miranda disclosure language. If ANY communication lacks this disclosure, it is an FDCPA §807(11) violation. Written failures are especially strong.",
     ));
   }
 
-  // FLAG: Check for cease contact / continued contact indicators
+  // FLAG 3: California License Number check (CA clients only)
+  if (clientState && clientState.toUpperCase() === "CA") {
+    flags.push(flag(
+      "CA_LICENSE_NUMBER_CHECK",
+      "high",
+      tl.creditorName,
+      `California client — CRO must verify ALL correspondence from "${tl.creditorName}" includes their California debt collector license number. Under California Civil Code §1788.11(e), every piece of correspondence to a CA resident must include the collector's CA license number.`,
+      tl.bureaus,
+      { creditor: tl.creditorName, clientState: "CA" },
+      "CRO: Request all letters and correspondence from this collector. Check each one for a California debt collector license number. If any correspondence is missing the CA license number, flag as a state-law violation.",
+    ));
+  }
+
+  // FLAG 4: Cease contact / continued contact indicators
   const hasCeaseRemark = tl.remarks.some(r =>
-    /cease|stop\s+contact|do\s+not\s+call|written\s+request/i.test(r)
+    /cease|stop\s+contact|do\s+not\s+call|written\s+request|cease\s+and\s+desist/i.test(r)
   );
   if (hasCeaseRemark) {
     flags.push(flag(
       "CEASE_CONTACT_INDICATOR",
       "critical",
       tl.creditorName,
-      `Cease contact indicator found in remarks. If client sent written stop request and collector continued contact, this is a critical FDCPA violation.`,
+      `Cease contact indicator found in remarks for "${tl.creditorName}". If the client sent a WRITTEN stop request and the collector continued contact AFTER receiving it, this is a CRITICAL FDCPA §805(c) violation. Must confirm all three elements: (1) written request was sent, (2) proof of receipt/delivery, (3) contact continued after receipt.`,
       tl.bureaus,
-      { remark: tl.remarks.find(r => /cease|stop\s+contact/i.test(r)) || null },
-      "FDCPA §805(c) — Confirm: (1) written stop request sent, (2) proof of receipt, (3) contact continued after receipt",
+      { remark: tl.remarks.find(r => /cease|stop\s+contact|cease\s+and\s+desist/i.test(r)) || null },
+      "CRO: Ask client: Did you send a written stop/cease request to this collector? Do you have a copy? How was it sent (certified mail, email)? Do you have proof of delivery/receipt? Did the collector contact you AFTER they received it? Get dates and documentation for all contact after the stop request.",
+    ));
+  }
+  // Even without a cease remark, always prompt CRO to ask about it for collection accounts
+  if (!hasCeaseRemark) {
+    flags.push(flag(
+      "CEASE_CONTACT_INVESTIGATION",
+      "medium",
+      tl.creditorName,
+      `CRO must ask if client sent a written cease/stop request to "${tl.creditorName}". If the client sent a written request and the collector continued contact afterward, this is a critical FDCPA §805(c) violation.`,
+      tl.bureaus,
+      { creditor: tl.creditorName },
+      "CRO: Ask client: Have you ever sent a written letter or email telling this collector to stop contacting you? If yes, get copy of the letter, proof of delivery, and documentation of any contact after the request was received.",
     ));
   }
 
-  // FLAG: Check for third-party disclosure indicators
+  // FLAG 5: Third-party disclosure indicators
   const hasThirdPartyRemark = tl.remarks.some(r =>
     /third.?party|spouse|family|employer|disclosed\s+to/i.test(r)
   );
@@ -641,30 +666,30 @@ function checkDebtCollectorViolations(tl: Tradeline): IssueFlag[] {
       "THIRD_PARTY_DISCLOSURE_INDICATOR",
       "critical",
       tl.creditorName,
-      `Third-party disclosure indicator found. If collector disclosed debt to spouse/family/employer/friend, this is a critical FDCPA violation.`,
+      `Third-party disclosure indicator found for "${tl.creditorName}". If the collector disclosed the existence of this debt to a spouse, family member, employer, or friend, this is a CRITICAL FDCPA §805(b) violation. Collectors may ONLY contact third parties to obtain location information and may NOT disclose that a debt is owed.`,
       tl.bureaus,
       { remark: tl.remarks.find(r => /third.?party|spouse|family|employer/i.test(r)) || null },
-      "FDCPA §805(b) — Get statements from third parties contacted, call logs to non-debtor numbers, misdirected correspondence",
+      "CRO: Ask client: Has this collector ever contacted your spouse, parents, children, other family members, friends, employer, or coworkers? Did they mention the debt? Get written statements from any third parties contacted, call logs showing calls to non-debtor numbers, and any misdirected correspondence.",
     ));
   }
 
-  // FLAG: Check for harassment / excessive calls indicators
+  // FLAG 6: Harassment / excessive calls indicators
   const hasHarassmentRemark = tl.remarks.some(r =>
-    /harass|excessive|threaten|abuse|multiple\s+calls|repeated/i.test(r)
+    /harass|excessive|threaten|abuse|multiple\s+calls|repeated|obscen/i.test(r)
   );
   if (hasHarassmentRemark) {
     flags.push(flag(
       "HARASSMENT_INDICATOR",
       "high",
       tl.creditorName,
-      `Harassment/excessive contact indicator found. CFPB Reg F: 7+ calls in 7 days, 3+ same day, or threatening language are violations.`,
+      `Harassment/excessive contact indicator found for "${tl.creditorName}". CFPB Reg F §1006.14(b): 7+ calls in 7 days to a specific phone number about a specific debt creates a presumption of harassment. Also violations: 3+ calls same day, back-to-back calls, threatening/abusive language, use of obscene language, threats of violence.`,
       tl.bureaus,
       { remark: tl.remarks.find(r => /harass|excessive|threaten/i.test(r)) || null },
-      "FDCPA §806 — Request call logs, history screenshots, recordings. Look for 7+ calls/week or 3+ calls/day",
+      "CRO: Ask client: How many times per day/week does this collector call? Do they call multiple times in a row? Have they used threatening, abusive, or obscene language? Request call log screenshots, phone history, and any recordings. Look for 7+ calls/week or 3+ calls/day patterns.",
     ));
   }
 
-  // FLAG: Check for workplace contact indicators
+  // FLAG 7: Workplace / inconvenient time contact indicators
   const hasWorkplaceRemark = tl.remarks.some(r =>
     /workplace|at\s+work|employer\s+contact|inconvenient/i.test(r)
   );
@@ -673,10 +698,10 @@ function checkDebtCollectorViolations(tl: Tradeline): IssueFlag[] {
       "INCONVENIENT_CONTACT_INDICATOR",
       "high",
       tl.creditorName,
-      `Workplace/inconvenient contact indicator found. Calls before 8AM/after 9PM, workplace calls, or continued calls after client said inconvenient are violations.`,
+      `Workplace/inconvenient contact indicator found for "${tl.creditorName}". FDCPA §805(a)(1): Calls before 8:00 AM or after 9:00 PM are per se violations. If during a RECORDED call the client stated they were at work or it was not a convenient time, and the collector continued calling, this is a violation. Recorded calls are REQUIRED evidence.`,
       tl.bureaus,
       { remark: tl.remarks.find(r => /workplace|at\s+work|inconvenient/i.test(r)) || null },
-      "FDCPA §805(a) — Request recorded calls, call logs with timestamps. Check for calls before 8AM/after 9PM or workplace calls",
+      "CRO: Ask client: Has this collector called you at work? Did you tell them it was inconvenient or that your employer prohibits such calls? Did they continue calling? What times do they typically call — before 8 AM or after 9 PM? Request recorded calls with timestamps and call logs showing time of calls.",
     ));
   }
 

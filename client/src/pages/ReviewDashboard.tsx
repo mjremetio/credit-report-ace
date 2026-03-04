@@ -84,6 +84,14 @@ export default function ReviewDashboard() {
     .filter((v: any) => v.croReminder)
     .map((v: any) => v.croReminder);
 
+  // Build a map from violation id to the account it belongs to
+  const violationAccountMap = new Map<number, any>();
+  for (const acct of negAccounts) {
+    for (const v of (acct.violations || [])) {
+      violationAccountMap.set(v.id, acct);
+    }
+  }
+
   // Group violations by account for display
   const fcraViolations = allViolations.filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
   const fdcpaViolations = allViolations.filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
@@ -200,6 +208,7 @@ export default function ReviewDashboard() {
                 <ViolationReviewCard
                   key={v.id}
                   violation={v}
+                  account={violationAccountMap.get(v.id)}
                   scanId={scanId}
                   isLocked={isApproved}
                   reviewerName={reviewerName}
@@ -221,6 +230,7 @@ export default function ReviewDashboard() {
                 <ViolationReviewCard
                   key={v.id}
                   violation={v}
+                  account={violationAccountMap.get(v.id)}
                   scanId={scanId}
                   isLocked={isApproved}
                   reviewerName={reviewerName}
@@ -270,12 +280,23 @@ export default function ReviewDashboard() {
           </motion.div>
         )}
 
-        {/* Review progress reminder */}
+        {/* Review progress reminder with Mark Complete option */}
         {isUnderReview && !allReviewed && summary && summary.total > 0 && (
-          <div className="bg-card border border-border rounded-xl p-5 text-center">
+          <div className="bg-card border border-border rounded-xl p-5 text-center space-y-4">
             <AlertTriangle className="w-6 h-6 text-yellow-500 mx-auto mb-2" />
             <p className="text-sm font-mono text-muted-foreground">
               {summary.pending} violation{summary.pending !== 1 ? "s" : ""} still pending review.
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => setShowApprovalModal(true)}
+                className="px-6 py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2 text-sm"
+              >
+                <Shield className="w-4 h-4" /> Approve Reviewed & Finalize
+              </button>
+            </div>
+            <p className="text-xs font-mono text-muted-foreground/70">
+              You can approve with pending violations — only reviewed violations will be included in the final report.
             </p>
           </div>
         )}
