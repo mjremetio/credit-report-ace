@@ -51,6 +51,7 @@ export interface BureauSummary {
   totalAccounts: number;
   openAccounts: number;
   closedAccounts: number;
+  delinquentCount: number;
   derogatoryCount: number;
   collectionsCount: number;
   publicRecordsCount: number;
@@ -381,6 +382,7 @@ export interface LLMBureauSummaryExtraction {
   totalAccounts?: number;
   openAccounts?: number;
   closedAccounts?: number;
+  delinquentCount?: number;
   derogatoryCount?: number;
   collectionsCount?: number;
   publicRecordsCount?: number;

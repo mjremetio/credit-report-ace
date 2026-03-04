@@ -288,6 +288,13 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
   if (report.bureauSummaries.length > 0) {
     // Use the max values across bureaus for totals
     for (const bs of report.bureauSummaries) {
+      // Override inquiriesCount with computed count from actual inquiry records
+      const computedInquiries = report.inquiries.filter(inq => inq.bureau === bs.bureau).length;
+      perBureauMap.set(bs.bureau, {
+        ...bs,
+        inquiriesCount: computedInquiries > 0 ? computedInquiries : bs.inquiriesCount,
+      });
+
       totalAccounts = Math.max(totalAccounts, bs.totalAccounts);
       openAccounts = Math.max(openAccounts, bs.openAccounts);
       closedAccounts = Math.max(closedAccounts, bs.closedAccounts);
@@ -332,6 +339,7 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
           totalAccounts: bTotal,
           openAccounts: bOpen,
           closedAccounts: bClosed,
+          delinquentCount: 0,
           derogatoryCount: bDerog,
           collectionsCount: bColl,
           publicRecordsCount: report.publicRecords.filter(pr => pr.bureaus.includes(bureauName)).length,
@@ -359,6 +367,7 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
       totalAccounts: 0,
       openAccounts: 0,
       closedAccounts: 0,
+      delinquentCount: 0,
       derogatoryCount: 0,
       collectionsCount: 0,
       publicRecordsCount: 0,
