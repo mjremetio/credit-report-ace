@@ -492,7 +492,7 @@ export async function runStructurePipeline(
   const scan = await storage.createScan({
     consumerName: parsedReport.profile.name || "Unknown Consumer",
     status: "in_progress",
-    currentStep: 3,
+    currentStep: 4,
   });
 
   const parsedReportRecord = await storage.createParsedReport({
@@ -525,7 +525,39 @@ export async function runStructurePipeline(
     });
   }
 
-  console.log(`[structure-pipeline] Complete: ${parsedReport.tradelines.length} tradelines, ${parsedReport.issueFlags.length} flags`);
+  // ── Step 8: Pre-create NegativeAccount records from tradelines ──
+  // This ensures that when the user navigates to ScanWizard, the accounts are visible
+  const negativeTradelines = parsedReport.tradelines.filter(tl => {
+    const tradelineFlags = parsedReport.issueFlags.filter(f =>
+      f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
+    );
+    return tl.aggregateStatus !== "current" || tradelineFlags.length > 0 || tl.accountType === "collection";
+  });
+
+  for (const tl of negativeTradelines) {
+    const tradelineFlags = parsedReport.issueFlags.filter(f =>
+      f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
+    );
+    const accountType = mapAccountType(tl.accountType, tl.aggregateStatus);
+    const rawDetails = buildTradelineRawDetails(tl, tradelineFlags);
+
+    await storage.createNegativeAccount({
+      scanId: scan.id,
+      creditor: tl.creditorName,
+      accountNumber: tl.accountNumberMasked || null,
+      accountType,
+      originalCreditor: tl.originalCreditor || null,
+      balance: tl.balance != null ? tl.balance : null,
+      dateOpened: tl.dates.opened || tl.dates.lastPayment || null,
+      dateOfDelinquency: tl.dates.firstDelinquency || null,
+      status: tl.aggregateStatus || null,
+      bureaus: tl.bureaus.join(", ") || null,
+      rawDetails,
+      workflowStep: "classified",
+    });
+  }
+
+  console.log(`[structure-pipeline] Complete: ${parsedReport.tradelines.length} tradelines, ${parsedReport.issueFlags.length} flags, ${negativeTradelines.length} negative accounts pre-created`);
 
   return {
     scanId: scan.id,
@@ -565,8 +597,10 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
 
   console.log(`[violation-pipeline] Running violation detection for scan ${scanId} (${negativeTradelines.length}/${parsedReport.tradelines.length} negative tradelines)`);
 
-  // Step 1: Create all NegativeAccount records (fast DB operations)
+  // Step 1: Use existing NegativeAccount records if present (from structure pipeline), else create new ones
+  const existingAccounts = await storage.getNegativeAccountsByScan(scanId);
   const accountEntries: Array<{ tl: Tradeline; negAccountId: number }> = [];
+
   for (const tl of negativeTradelines) {
     const tradelineFlags = (parsedReport.issueFlags || []).filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
@@ -574,22 +608,32 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
     const accountType = mapAccountType(tl.accountType, tl.aggregateStatus);
     const rawDetails = buildTradelineRawDetails(tl, tradelineFlags);
 
-    const negAccount = await storage.createNegativeAccount({
-      scanId,
-      creditor: tl.creditorName,
-      accountNumber: tl.accountNumberMasked || null,
-      accountType,
-      originalCreditor: tl.originalCreditor || null,
-      balance: tl.balance != null ? tl.balance : null,
-      dateOpened: tl.dates.opened || tl.dates.lastPayment || null,
-      dateOfDelinquency: tl.dates.firstDelinquency || null,
-      status: tl.aggregateStatus || null,
-      bureaus: tl.bureaus.join(", ") || null,
-      rawDetails,
-      workflowStep: "classified",
-    });
+    // Check if a matching account already exists (created by structure pipeline)
+    const existing = existingAccounts.find(a =>
+      a.creditor.toLowerCase() === tl.creditorName.toLowerCase()
+    );
 
-    accountEntries.push({ tl, negAccountId: negAccount.id });
+    if (existing) {
+      // Update existing account with enriched rawDetails (now includes cross-bureau comparison)
+      await storage.updateNegativeAccount(existing.id, { rawDetails });
+      accountEntries.push({ tl, negAccountId: existing.id });
+    } else {
+      const negAccount = await storage.createNegativeAccount({
+        scanId,
+        creditor: tl.creditorName,
+        accountNumber: tl.accountNumberMasked || null,
+        accountType,
+        originalCreditor: tl.originalCreditor || null,
+        balance: tl.balance != null ? tl.balance : null,
+        dateOpened: tl.dates.opened || tl.dates.lastPayment || null,
+        dateOfDelinquency: tl.dates.firstDelinquency || null,
+        status: tl.aggregateStatus || null,
+        bureaus: tl.bureaus.join(", ") || null,
+        rawDetails,
+        workflowStep: "classified",
+      });
+      accountEntries.push({ tl, negAccountId: negAccount.id });
+    }
   }
 
   // Step 2: Run AI violation detection in parallel batches of 3
@@ -914,53 +958,204 @@ function mapManualStatus(typeOrStatus: string | null): AccountStatus {
 
 /** Build rawDetails string for a tradeline (used by both report and violation pipelines) */
 function buildTradelineRawDetails(tl: Tradeline, tradelineFlags: IssueFlag[]): string {
-  const flagLines = tradelineFlags.map(f =>
-    `[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`
-  ).join("\n");
+  const sections: string[] = [];
 
-  const bureauLines = tl.bureauDetails.map(bd => {
-    const payHistStr = (bd.paymentHistory && bd.paymentHistory.length > 0)
-      ? `  Payment History: ${bd.paymentHistory.map(ph => `${ph.month}:${ph.code}`).join(", ")}`
-      : null;
+  // ── Account Overview ──
+  sections.push("═══ ACCOUNT OVERVIEW ═══");
+  sections.push(`Creditor: ${tl.creditorName}`);
+  if (tl.accountNumberMasked) sections.push(`Account: ${tl.accountNumberMasked}`);
+  sections.push(`Type: ${tl.accountType}`);
+  sections.push(`Aggregate Status: ${tl.aggregateStatus}`);
+  if (tl.originalCreditor) sections.push(`Original Creditor: ${tl.originalCreditor}`);
+  if (tl.balance != null) sections.push(`Aggregate Balance: $${tl.balance}`);
+  if (tl.dates.opened) sections.push(`Date Opened: ${tl.dates.opened}`);
+  if (tl.dates.closed) sections.push(`Date Closed: ${tl.dates.closed}`);
+  if (tl.dates.firstDelinquency) sections.push(`DOFD: ${tl.dates.firstDelinquency}`);
+  if (tl.dates.lastPayment) sections.push(`Last Payment: ${tl.dates.lastPayment}`);
+  if (tl.dates.lastReported) sections.push(`Last Reported: ${tl.dates.lastReported}`);
+  if (tl.bureaus.length > 0) sections.push(`Reporting Bureaus: ${tl.bureaus.join(", ")}`);
 
-    const fields = [
-      `  Bureau: ${bd.bureau}`,
-      bd.accountNumber ? `  Account#: ${bd.accountNumber}` : null,
-      bd.balance != null ? `  Balance: $${bd.balance}` : null,
-      bd.status ? `  Status: ${bd.status}` : null,
-      bd.dateOpened ? `  Date Opened: ${bd.dateOpened}` : null,
-      bd.dateClosed ? `  Date Closed: ${bd.dateClosed}` : null,
-      bd.lastPaymentDate ? `  Last Payment: ${bd.lastPaymentDate}` : null,
-      bd.lastReportedDate ? `  Last Reported: ${bd.lastReportedDate}` : null,
-      bd.highBalance != null ? `  High Balance: $${bd.highBalance}` : null,
-      bd.creditLimit != null ? `  Credit Limit: $${bd.creditLimit}` : null,
-      bd.monthlyPayment != null ? `  Monthly Payment: $${bd.monthlyPayment}` : null,
-      bd.pastDueAmount != null ? `  Past Due Amount: $${bd.pastDueAmount}` : null,
-      bd.paymentStatus ? `  Payment Status: ${bd.paymentStatus}` : null,
-      bd.creditorType ? `  Creditor Type: ${bd.creditorType}` : null,
-      bd.accountRating ? `  Account Rating: ${bd.accountRating}` : null,
-      bd.terms ? `  Terms: ${bd.terms}` : null,
-      (bd.remarks && bd.remarks.length > 0) ? `  Remarks: ${bd.remarks.join("; ")}` : null,
-      payHistStr,
-    ].filter(Boolean).join("\n");
-    return fields;
-  }).join("\n---\n");
+  // ── All Remarks ──
+  if (tl.remarks.length > 0) {
+    sections.push("");
+    sections.push("═══ REMARKS (ALL BUREAUS) ═══");
+    for (const r of tl.remarks) {
+      sections.push(`  • ${r}`);
+    }
+  }
 
-  return [
-    `Creditor: ${tl.creditorName}`,
-    tl.accountNumberMasked ? `Account: ${tl.accountNumberMasked}` : null,
-    `Type: ${tl.accountType}`,
-    `Status: ${tl.aggregateStatus}`,
-    tl.originalCreditor ? `Original Creditor: ${tl.originalCreditor}` : null,
-    tl.balance != null ? `Balance: $${tl.balance}` : null,
-    tl.dates.opened ? `Date Opened: ${tl.dates.opened}` : null,
-    tl.dates.closed ? `Date Closed: ${tl.dates.closed}` : null,
-    tl.dates.firstDelinquency ? `DOFD: ${tl.dates.firstDelinquency}` : null,
-    tl.dates.lastPayment ? `Last Payment: ${tl.dates.lastPayment}` : null,
-    tl.dates.lastReported ? `Last Reported: ${tl.dates.lastReported}` : null,
-    tl.bureaus.length > 0 ? `Bureaus: ${tl.bureaus.join(", ")}` : null,
-    tl.remarks.length > 0 ? `\nRemarks:\n${tl.remarks.map(r => `  - ${r}`).join("\n")}` : null,
-    bureauLines ? `\nPer-Bureau Details:\n${bureauLines}` : null,
-    flagLines ? `\nRule-Based Flags:\n${flagLines}` : null,
-  ].filter(Boolean).join("\n");
+  // ── Per-Bureau Detail Blocks ──
+  if (tl.bureauDetails.length > 0) {
+    sections.push("");
+    sections.push("═══ PER-BUREAU DETAILS ═══");
+
+    for (const bd of tl.bureauDetails) {
+      sections.push(`\n--- ${bd.bureau} ---`);
+      if (bd.accountNumber) sections.push(`  Account#: ${bd.accountNumber}`);
+      if (bd.balance != null) sections.push(`  Balance: $${bd.balance}`);
+      if (bd.status) sections.push(`  Status: ${bd.status}`);
+      if (bd.dateOpened) sections.push(`  Date Opened: ${bd.dateOpened}`);
+      if (bd.dateClosed) sections.push(`  Date Closed: ${bd.dateClosed}`);
+      if (bd.lastPaymentDate) sections.push(`  Last Payment: ${bd.lastPaymentDate}`);
+      if (bd.lastReportedDate) sections.push(`  Last Reported: ${bd.lastReportedDate}`);
+      if (bd.highBalance != null) sections.push(`  High Balance: $${bd.highBalance}`);
+      if (bd.creditLimit != null) sections.push(`  Credit Limit: $${bd.creditLimit}`);
+      if (bd.monthlyPayment != null) sections.push(`  Monthly Payment: $${bd.monthlyPayment}`);
+      if (bd.pastDueAmount != null) sections.push(`  Past Due Amount: $${bd.pastDueAmount}`);
+      if (bd.paymentStatus) sections.push(`  Payment Status: ${bd.paymentStatus}`);
+      if (bd.creditorType) sections.push(`  Creditor Type: ${bd.creditorType}`);
+      if (bd.accountRating) sections.push(`  Account Rating: ${bd.accountRating}`);
+      if (bd.terms) sections.push(`  Terms: ${bd.terms}`);
+      if (bd.remarks && bd.remarks.length > 0) {
+        sections.push(`  Remarks: ${bd.remarks.join("; ")}`);
+      }
+      if (bd.paymentHistory && bd.paymentHistory.length > 0) {
+        sections.push(`  Payment History (24mo): ${bd.paymentHistory.map(ph => `${ph.month}:${ph.code}`).join(", ")}`);
+      }
+    }
+  }
+
+  // ── Cross-Bureau Comparison Summary ──
+  if (tl.bureauDetails.length >= 2) {
+    const comparison = buildCrossBureauComparison(tl);
+    if (comparison) {
+      sections.push("");
+      sections.push("═══ CROSS-BUREAU COMPARISON ═══");
+      sections.push(comparison);
+    }
+  }
+
+  // ── Rule-Based Flags ──
+  if (tradelineFlags.length > 0) {
+    sections.push("");
+    sections.push("═══ RULE-BASED FLAGS ═══");
+    for (const f of tradelineFlags) {
+      sections.push(`[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`);
+      if (f.suggestedDispute) {
+        sections.push(`  → Suggested: ${f.suggestedDispute}`);
+      }
+    }
+  }
+
+  return sections.join("\n");
+}
+
+/** Build a cross-bureau comparison summary highlighting discrepancies */
+function buildCrossBureauComparison(tl: Tradeline): string | null {
+  const diffs: string[] = [];
+  const details = tl.bureauDetails;
+
+  // Compare balances
+  const balances = details.filter(bd => bd.balance != null).map(bd => ({ b: bd.bureau, v: bd.balance! }));
+  if (balances.length >= 2) {
+    const unique = new Set(balances.map(x => x.v));
+    if (unique.size > 1) {
+      diffs.push(`BALANCE: ${balances.map(x => `${x.b}=$${x.v}`).join(" | ")}`);
+    }
+  }
+
+  // Compare statuses
+  const statuses = details.filter(bd => bd.status).map(bd => ({ b: bd.bureau, v: bd.status! }));
+  if (statuses.length >= 2) {
+    const unique = new Set(statuses.map(x => x.v.toLowerCase()));
+    if (unique.size > 1) {
+      diffs.push(`STATUS: ${statuses.map(x => `${x.b}="${x.v}"`).join(" | ")}`);
+    }
+  }
+
+  // Compare date opened
+  const openDates = details.filter(bd => bd.dateOpened).map(bd => ({ b: bd.bureau, v: bd.dateOpened! }));
+  if (openDates.length >= 2) {
+    const unique = new Set(openDates.map(x => x.v));
+    if (unique.size > 1) {
+      diffs.push(`DATE OPENED: ${openDates.map(x => `${x.b}=${x.v}`).join(" | ")}`);
+    }
+  }
+
+  // Compare high balance
+  const highBalances = details.filter(bd => bd.highBalance != null).map(bd => ({ b: bd.bureau, v: bd.highBalance! }));
+  if (highBalances.length >= 2) {
+    const unique = new Set(highBalances.map(x => x.v));
+    if (unique.size > 1) {
+      diffs.push(`HIGH BALANCE: ${highBalances.map(x => `${x.b}=$${x.v}`).join(" | ")}`);
+    }
+  }
+
+  // Compare credit limits
+  const limits = details.filter(bd => bd.creditLimit != null).map(bd => ({ b: bd.bureau, v: bd.creditLimit! }));
+  if (limits.length >= 2) {
+    const unique = new Set(limits.map(x => x.v));
+    if (unique.size > 1) {
+      diffs.push(`CREDIT LIMIT: ${limits.map(x => `${x.b}=$${x.v}`).join(" | ")}`);
+    }
+  }
+
+  // Compare creditor types
+  const credTypes = details.filter(bd => bd.creditorType).map(bd => ({ b: bd.bureau, v: bd.creditorType! }));
+  if (credTypes.length >= 2) {
+    const unique = new Set(credTypes.map(x => x.v.toLowerCase()));
+    if (unique.size > 1) {
+      diffs.push(`CREDITOR TYPE: ${credTypes.map(x => `${x.b}="${x.v}"`).join(" | ")}`);
+    }
+  }
+
+  // Compare account ratings
+  const ratings = details.filter(bd => bd.accountRating).map(bd => ({ b: bd.bureau, v: bd.accountRating! }));
+  if (ratings.length >= 2) {
+    const unique = new Set(ratings.map(x => x.v.toLowerCase()));
+    if (unique.size > 1) {
+      diffs.push(`ACCOUNT RATING: ${ratings.map(x => `${x.b}="${x.v}"`).join(" | ")}`);
+    }
+  }
+
+  // Compare payment statuses
+  const payStatuses = details.filter(bd => bd.paymentStatus).map(bd => ({ b: bd.bureau, v: bd.paymentStatus! }));
+  if (payStatuses.length >= 2) {
+    const unique = new Set(payStatuses.map(x => x.v.toLowerCase()));
+    if (unique.size > 1) {
+      diffs.push(`PAYMENT STATUS: ${payStatuses.map(x => `${x.b}="${x.v}"`).join(" | ")}`);
+    }
+  }
+
+  // Compare last reported dates
+  const lastReported = details.filter(bd => bd.lastReportedDate).map(bd => ({ b: bd.bureau, v: bd.lastReportedDate! }));
+  if (lastReported.length >= 2) {
+    const unique = new Set(lastReported.map(x => x.v));
+    if (unique.size > 1) {
+      diffs.push(`LAST REPORTED: ${lastReported.map(x => `${x.b}=${x.v}`).join(" | ")}`);
+    }
+  }
+
+  // Compare last payment dates
+  const lastPayment = details.filter(bd => bd.lastPaymentDate).map(bd => ({ b: bd.bureau, v: bd.lastPaymentDate! }));
+  if (lastPayment.length >= 2) {
+    const unique = new Set(lastPayment.map(x => x.v));
+    if (unique.size > 1) {
+      diffs.push(`LAST PAYMENT: ${lastPayment.map(x => `${x.b}=${x.v}`).join(" | ")}`);
+    }
+  }
+
+  // Check for balance vs high balance issues per bureau
+  for (const bd of details) {
+    if (bd.balance != null && bd.highBalance != null && bd.balance > bd.highBalance) {
+      diffs.push(`⚠ ${bd.bureau}: Balance $${bd.balance} EXCEEDS High Balance $${bd.highBalance}`);
+    }
+  }
+
+  // Check dispute remark consistency
+  const bureausWithDispute: string[] = [];
+  const bureausWithoutDispute: string[] = [];
+  for (const bd of details) {
+    const hasDispute = (bd.remarks || []).some(r => /dispute|disputed/i.test(r));
+    if (hasDispute) bureausWithDispute.push(bd.bureau);
+    else bureausWithoutDispute.push(bd.bureau);
+  }
+  if (bureausWithDispute.length > 0 && bureausWithoutDispute.length > 0) {
+    diffs.push(`⚠ DISPUTE REMARK: Present on ${bureausWithDispute.join(", ")} | Missing on ${bureausWithoutDispute.join(", ")}`);
+  }
+
+  if (diffs.length === 0) {
+    return "All bureaus reporting consistent data (no cross-bureau discrepancies detected).";
+  }
+  return `${diffs.length} discrepanc${diffs.length === 1 ? "y" : "ies"} found:\n${diffs.map(d => `  • ${d}`).join("\n")}`;
 }
