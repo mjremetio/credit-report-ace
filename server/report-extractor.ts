@@ -63,18 +63,26 @@ const PROFILE_EXTRACTION_PROMPT = `Extract personal information from this credit
 
 IMPORTANT: For tri-bureau reports, Date of Birth may differ or be missing for certain bureaus.
 Extract the per-bureau Date of Birth values separately. If the report shows DOB in a tri-bureau
-format (e.g., "DATE OF BIRTH | TransUnion: 01/15/1985 | Experian: 01/15/1985 | Equifax: --"),
-extract each bureau's value. If a bureau shows "--" or is blank, use null for that bureau.
+format (e.g., "DATE OF BIRTH | TransUnion: 01/15/1985 | Experian: 01/15/1985 | Equifax: --"
+or "DATE OF BIRTH | 1995 | 1995 | 1997"), extract each bureau's value.
+If a bureau shows "--" or is blank, use null for that bureau.
+
+CRITICAL: Date of Birth may appear as a full date (01/15/1985), year-month (03/1985), or YEAR ONLY (1995).
+Always preserve the value exactly as available — use "YYYY-MM-DD" if full date, "YYYY-MM" if month+year,
+or "YYYY" if only year. Do NOT return null just because the date is partial. A year like "1995" is valid.
+
+When DOB appears in a table row like "DATE OF BIRTH | value1 | value2 | value3", the columns
+correspond to TransUnion, Experian, Equifax (in that order) based on the table headers.
 
 Return JSON:
 {
   "name": "FULL NAME",
   "aliases": ["any name variations"],
-  "dateOfBirth": "YYYY-MM-DD or null",
+  "dateOfBirth": "YYYY-MM-DD, YYYY-MM, or YYYY (use most complete value across bureaus, or null)",
   "dateOfBirthPerBureau": [
-    { "bureau": "TransUnion", "value": "YYYY-MM-DD or null" },
-    { "bureau": "Experian", "value": "YYYY-MM-DD or null" },
-    { "bureau": "Equifax", "value": "YYYY-MM-DD or null" }
+    { "bureau": "TransUnion", "value": "YYYY-MM-DD or YYYY-MM or YYYY or null" },
+    { "bureau": "Experian", "value": "YYYY-MM-DD or YYYY-MM or YYYY or null" },
+    { "bureau": "Equifax", "value": "YYYY-MM-DD or YYYY-MM or YYYY or null" }
   ],
   "ssn": "XXX-XX-1234 (masked) or null",
   "reportDate": "YYYY-MM-DD",
@@ -425,7 +433,41 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
       continue;
     }
     const data = settled.value;
-    if (data.profile && !raw.profile) raw.profile = data.profile;
+    if (data.profile) {
+      if (!raw.profile) {
+        raw.profile = data.profile;
+      } else {
+        // Merge profile fields from later batches — fill in missing data
+        // This handles the case where Credit Scores and Personal Info are in separate batches
+        if (!raw.profile.dateOfBirth && data.profile.dateOfBirth) {
+          raw.profile.dateOfBirth = data.profile.dateOfBirth;
+        }
+        if ((!raw.profile.dateOfBirthPerBureau || raw.profile.dateOfBirthPerBureau.length === 0) && data.profile.dateOfBirthPerBureau && data.profile.dateOfBirthPerBureau.length > 0) {
+          raw.profile.dateOfBirthPerBureau = data.profile.dateOfBirthPerBureau;
+        }
+        if (!raw.profile.ssn && data.profile.ssn) {
+          raw.profile.ssn = data.profile.ssn;
+        }
+        if (!raw.profile.name && data.profile.name) {
+          raw.profile.name = data.profile.name;
+        }
+        if ((!raw.profile.aliases || raw.profile.aliases.length === 0) && data.profile.aliases && data.profile.aliases.length > 0) {
+          raw.profile.aliases = data.profile.aliases;
+        }
+        if (!raw.profile.reportDate && data.profile.reportDate) {
+          raw.profile.reportDate = data.profile.reportDate;
+        }
+        if ((!raw.profile.scores || raw.profile.scores.length === 0) && data.profile.scores && data.profile.scores.length > 0) {
+          raw.profile.scores = data.profile.scores;
+        }
+        if ((!raw.profile.addresses || raw.profile.addresses.length === 0) && data.profile.addresses && data.profile.addresses.length > 0) {
+          raw.profile.addresses = data.profile.addresses;
+        }
+        if ((!raw.profile.employers || raw.profile.employers.length === 0) && data.profile.employers && data.profile.employers.length > 0) {
+          raw.profile.employers = data.profile.employers;
+        }
+      }
+    }
     raw.bureauSummaries.push(...data.bureauSummaries);
     raw.tradelines.push(...data.tradelines);
     raw.publicRecords.push(...data.publicRecords);

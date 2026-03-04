@@ -211,6 +211,26 @@ function restructureTriBureauPdfText(rawText: string): string | null {
     if (structured) {
       outputLines.push(structured);
     } else {
+      // Check if this line is a standalone field label whose values are on the next line
+      // (common in PDF text extraction where label and values get split across lines)
+      const labelOnly = trimmed.toLowerCase();
+      if (fieldLabelSet.has(labelOnly) && i + 1 < lines.length) {
+        const nextLine = lines[i + 1].trim();
+        if (nextLine) {
+          const nextSegments = nextLine.split(/\s{2,}|\t+/).map(s => s.trim()).filter(Boolean);
+          const dataCount = nextSegments.filter(s => isDataLikeValue(s)).length;
+          if (nextSegments.length >= 1 && dataCount >= 1) {
+            // Combine label with next line's values and re-process
+            const combinedLine = `${trimmed}  ${nextLine}`;
+            const combinedResult = tryStructureFieldLine(combinedLine, currentSection, fieldLabelSet);
+            if (combinedResult) {
+              outputLines.push(combinedResult);
+              i++; // skip the next line since we consumed it
+              continue;
+            }
+          }
+        }
+      }
       // Pass through lines that don't match field patterns (creditor names, headers, etc.)
       // but still clean up excessive whitespace
       const cleaned = trimmed.replace(/\s{2,}/g, "  ");
