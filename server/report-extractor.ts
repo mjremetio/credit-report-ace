@@ -66,15 +66,21 @@ Extract the per-bureau Date of Birth values separately. If the report shows DOB 
 format (e.g., "DATE OF BIRTH | TransUnion: 01/15/1985 | Experian: 01/15/1985 | Equifax: --"),
 extract each bureau's value. If a bureau shows "--" or is blank, use null for that bureau.
 
+Date of Birth values may appear in various formats:
+- Full date: "01/15/1985" → extract as "1985-01-15"
+- Month/Year: "01/1985" → extract as "1985-01"
+- Year only: "1985" → extract as "1985"
+Always preserve whatever date information is available. Do NOT return null if a year or partial date is present.
+
 Return JSON:
 {
   "name": "FULL NAME",
   "aliases": ["any name variations"],
-  "dateOfBirth": "YYYY-MM-DD or null",
+  "dateOfBirth": "YYYY-MM-DD or YYYY-MM or YYYY or null",
   "dateOfBirthPerBureau": [
-    { "bureau": "TransUnion", "value": "YYYY-MM-DD or null" },
-    { "bureau": "Experian", "value": "YYYY-MM-DD or null" },
-    { "bureau": "Equifax", "value": "YYYY-MM-DD or null" }
+    { "bureau": "TransUnion", "value": "YYYY-MM-DD or YYYY-MM or YYYY or null" },
+    { "bureau": "Experian", "value": "YYYY-MM-DD or YYYY-MM or YYYY or null" },
+    { "bureau": "Equifax", "value": "YYYY-MM-DD or YYYY-MM or YYYY or null" }
   ],
   "ssn": "XXX-XX-1234 (masked) or null",
   "reportDate": "YYYY-MM-DD",
