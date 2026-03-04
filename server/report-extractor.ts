@@ -61,11 +61,21 @@ Return ONLY valid JSON.`;
 
 const PROFILE_EXTRACTION_PROMPT = `Extract personal information from this credit report section.
 
+IMPORTANT: For tri-bureau reports, Date of Birth may differ or be missing for certain bureaus.
+Extract the per-bureau Date of Birth values separately. If the report shows DOB in a tri-bureau
+format (e.g., "DATE OF BIRTH | TransUnion: 01/15/1985 | Experian: 01/15/1985 | Equifax: --"),
+extract each bureau's value. If a bureau shows "--" or is blank, use null for that bureau.
+
 Return JSON:
 {
   "name": "FULL NAME",
   "aliases": ["any name variations"],
   "dateOfBirth": "YYYY-MM-DD or null",
+  "dateOfBirthPerBureau": [
+    { "bureau": "TransUnion", "value": "YYYY-MM-DD or null" },
+    { "bureau": "Experian", "value": "YYYY-MM-DD or null" },
+    { "bureau": "Equifax", "value": "YYYY-MM-DD or null" }
+  ],
   "ssn": "XXX-XX-1234 (masked) or null",
   "reportDate": "YYYY-MM-DD",
   "scores": [{ "bureau": "TransUnion|Experian|Equifax", "score": 557, "model": "VantageScore 3.0" }],
@@ -472,10 +482,31 @@ function dedupeTradelineKey(t: LLMTradelineExtraction): string {
 
 export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
   // ── Profile ──
+  // Build per-bureau DOB: use LLM-extracted per-bureau values, or fall back to single value
+  const dobPerBureau: Array<{ bureau: Bureau; value: string | null }> = [];
+  if (raw.profile?.dateOfBirthPerBureau && raw.profile.dateOfBirthPerBureau.length > 0) {
+    for (const entry of raw.profile.dateOfBirthPerBureau) {
+      const bureau = normalizeBureau(entry.bureau);
+      if (bureau) {
+        dobPerBureau.push({ bureau, value: entry.value || null });
+      }
+    }
+  }
+  // Ensure all 3 bureaus are represented
+  const ALL_BUREAU_NAMES: Bureau[] = ["TransUnion", "Experian", "Equifax"];
+  for (const b of ALL_BUREAU_NAMES) {
+    if (!dobPerBureau.find(d => d.bureau === b)) {
+      // If we have a single dateOfBirth but no per-bureau data, replicate it
+      const fallback = raw.profile?.dateOfBirth || null;
+      dobPerBureau.push({ bureau: b, value: dobPerBureau.length === 0 ? fallback : null });
+    }
+  }
+
   const profile: CreditReportProfile = {
     name: raw.profile?.name || "Unknown Consumer",
     aliases: raw.profile?.aliases || [],
     dateOfBirth: raw.profile?.dateOfBirth || undefined,
+    dateOfBirthPerBureau: dobPerBureau,
     ssn: raw.profile?.ssn || undefined,
     reportDate: raw.profile?.reportDate || new Date().toISOString().split("T")[0],
     scores: (raw.profile?.scores || []).map(s => ({

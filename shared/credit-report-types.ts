@@ -28,10 +28,16 @@ export interface PersonalEmployer {
   bureaus: Bureau[];
 }
 
+export interface BureauValue {
+  bureau: Bureau;
+  value: string | null;
+}
+
 export interface CreditReportProfile {
   name: string;
   aliases?: string[];
   dateOfBirth?: string;
+  dateOfBirthPerBureau?: BureauValue[];
   ssn?: string; // masked, e.g. "XXX-XX-1234"
   reportDate: string; // ISO date the report was pulled
   scores: BureauScore[];
@@ -260,6 +266,7 @@ export interface OrganizedCreditReport {
     name: string;
     aliases: string[];
     dateOfBirth: string | null;
+    dateOfBirthPerBureau: BureauValue[];
     ssn: string | null;
     reportDate: string;
     addresses: PersonalAddress[];
@@ -304,6 +311,7 @@ export interface LLMProfileExtraction {
   name: string;
   aliases?: string[];
   dateOfBirth?: string;
+  dateOfBirthPerBureau?: Array<{ bureau: string; value: string | null }>;
   ssn?: string;
   reportDate?: string;
   scores?: Array<{ bureau: string; score: number | null; model?: string }>;
