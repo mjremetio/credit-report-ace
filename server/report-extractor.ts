@@ -286,7 +286,7 @@ async function extractSingleBatch(batch: ReportSection[]): Promise<RawExtraction
   };
 
   if (primaryType === "personal_info") {
-    const data = await llmExtract<{ name?: string; aliases?: string[]; dateOfBirth?: string; ssn?: string; reportDate?: string; scores?: any[]; addresses?: any[]; employers?: any[] }>(
+    const data = await llmExtract<{ name?: string; aliases?: string[]; dateOfBirth?: string; dateOfBirthPerBureau?: Array<{ bureau: string; value: string | null }>; ssn?: string; reportDate?: string; scores?: any[]; addresses?: any[]; employers?: any[] }>(
       EXTRACTION_SYSTEM_PROMPT,
       PROFILE_EXTRACTION_PROMPT,
       batchText,
@@ -494,11 +494,12 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
   }
   // Ensure all 3 bureaus are represented
   const ALL_BUREAU_NAMES: Bureau[] = ["TransUnion", "Experian", "Equifax"];
+  const hasPerBureauData = dobPerBureau.length > 0;
   for (const b of ALL_BUREAU_NAMES) {
     if (!dobPerBureau.find(d => d.bureau === b)) {
-      // If we have a single dateOfBirth but no per-bureau data, replicate it
+      // If we have a single dateOfBirth but no per-bureau data, replicate it to all bureaus
       const fallback = raw.profile?.dateOfBirth || null;
-      dobPerBureau.push({ bureau: b, value: dobPerBureau.length === 0 ? fallback : null });
+      dobPerBureau.push({ bureau: b, value: hasPerBureauData ? null : fallback });
     }
   }
 
