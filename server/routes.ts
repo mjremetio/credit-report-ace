@@ -136,7 +136,8 @@ export async function registerRoutes(
           return { ...acct, violations: acctViolations };
         })
       );
-      res.json({ ...scan, negativeAccounts: accountsWithDetails });
+      const parsedReport = await storage.getParsedReportByScan(id);
+      res.json({ ...scan, negativeAccounts: accountsWithDetails, hasParsedReport: !!parsedReport });
     } catch (error) {
       console.error("Error fetching scan:", error);
       res.status(500).json({ error: "Failed to fetch scan" });

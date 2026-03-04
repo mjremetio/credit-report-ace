@@ -52,6 +52,31 @@ export default function Upload() {
     consumerStatements: false,
   });
 
+  // Workflow step definitions — consistent across all phases
+  const WORKFLOW_STEPS = [
+    { key: "upload", label: "Upload / Input" },
+    { key: "review", label: "Review Text" },
+    { key: "structure", label: "AI Structuring" },
+    { key: "review-data", label: "Review Data" },
+    { key: "violations", label: "Violation Analysis" },
+    { key: "complete", label: "Complete" },
+  ];
+
+  const getActiveStepIndex = (p: UploadPhase): number => {
+    switch (p) {
+      case "idle": return 0;
+      case "extracting": return 0;
+      case "reviewing": return 1;
+      case "structuring": return 2;
+      case "structured": return 3;
+      case "analyzing": return 4;
+      case "complete": return 5;
+      default: return 0;
+    }
+  };
+
+  const activeStepIndex = getActiveStepIndex(phase);
+
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${ts()}] ${msg}`]);
 
   // Phase 1: Extract text from file (fast, no LLM)
@@ -373,27 +398,52 @@ export default function Upload() {
             )}
 
             <div className="mt-6 bg-card border border-border rounded-xl p-5">
-              <h4 className="font-display text-foreground text-sm mb-3">Upload Report</h4>
+              <h4 className="font-display text-foreground text-sm mb-3">Workflow</h4>
               <div className="space-y-3">
-                {[
-                  { step: 1, text: "Upload file or paste raw credit report text" },
-                  { step: 2, text: "Review & edit extracted text for accuracy" },
-                  { step: 3, text: "AI structures into organized JSON (scores, personal info, bureau summary, tradelines, public records, inquiries)" },
-                  { step: 4, text: "Review structured JSON — verify consumer name & data" },
-                  { step: 5, text: "AI violation analysis for FCRA/FDCPA violations (separate step)" },
-                  { step: 6, text: "Paralegal manual review — Edit analysis reports" },
-                  { step: 7, text: "Export approved report (PDF/CSV)" },
-                ].map((item) => (
-                  <div key={item.step} className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-mono flex-shrink-0">
-                      {item.step}
+                {WORKFLOW_STEPS.map((step, i) => (
+                  <div key={step.key} className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono flex-shrink-0 ${
+                      i === activeStepIndex
+                        ? "bg-primary text-primary-foreground"
+                        : i < activeStepIndex
+                        ? "bg-green-500/20 text-green-600"
+                        : "bg-secondary text-muted-foreground"
+                    }`}>
+                      {i < activeStepIndex ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
                     </div>
-                    <span className="text-sm font-mono text-muted-foreground">{item.text}</span>
+                    <span className={`text-sm font-mono ${
+                      i === activeStepIndex ? "text-primary font-medium" : i < activeStepIndex ? "text-green-600" : "text-muted-foreground"
+                    }`}>{step.label}</span>
                   </div>
                 ))}
               </div>
             </div>
           </motion.div>
+        )}
+
+        {/* ── Step Progress Indicator (visible during processing & review phases) ── */}
+        {phase !== "idle" && (
+          <div className="flex items-center gap-1 mb-4">
+            {WORKFLOW_STEPS.map((step, i) => (
+              <div key={step.key} className="flex items-center">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-mono transition-all ${
+                  i === activeStepIndex
+                    ? "bg-primary text-primary-foreground ring-2 ring-primary/30"
+                    : i < activeStepIndex
+                    ? "bg-green-500/20 text-green-600"
+                    : "bg-secondary text-muted-foreground"
+                }`}>
+                  {i < activeStepIndex ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
+                </div>
+                {i < WORKFLOW_STEPS.length - 1 && (
+                  <div className={`w-6 h-0.5 mx-0.5 ${i < activeStepIndex ? "bg-green-500/40" : "bg-border"}`} />
+                )}
+              </div>
+            ))}
+            <span className="ml-3 text-xs font-mono text-muted-foreground">
+              {WORKFLOW_STEPS[activeStepIndex]?.label}
+            </span>
+          </div>
         )}
 
         {/* ── EXTRACTING: Progress Animation ── */}
@@ -947,27 +997,29 @@ export default function Upload() {
 
             {/* Next Steps in Workflow */}
             <div className="bg-card border border-border rounded-xl p-5">
-              <h4 className="font-display text-foreground text-sm mb-3">Completed Steps</h4>
-              <div className="space-y-2 text-xs font-mono text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-                  <span>Text extracted & reviewed</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-                  <span>Structured JSON created (TransUnion, Experian, Equifax)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-                  <span>AI violation analysis complete</span>
-                </div>
-                <div className="flex items-center gap-2">
+              <h4 className="font-display text-foreground text-sm mb-3">Workflow Progress</h4>
+              <div className="space-y-2 text-xs font-mono">
+                {WORKFLOW_STEPS.map((step, i) => {
+                  const isComplete = i < activeStepIndex;
+                  const isCurrent = i === activeStepIndex;
+                  return (
+                    <div key={step.key} className="flex items-center gap-2">
+                      {isComplete ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      ) : isCurrent ? (
+                        <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                      ) : (
+                        <div className="w-4 h-4 rounded-full border border-border flex-shrink-0" />
+                      )}
+                      <span className={
+                        isComplete ? "text-green-600" : isCurrent ? "text-primary font-medium" : "text-muted-foreground/50"
+                      }>{step.label}</span>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center gap-2 mt-1 pt-1 border-t border-border/50">
                   <ClipboardCheck className="w-4 h-4 text-primary flex-shrink-0" />
-                  <span className="text-primary">Paralegal manual review — Edit analysis reports</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
-                  <span>Export (after review & approval)</span>
+                  <span className="text-primary font-medium">Next: Paralegal review & export</span>
                 </div>
               </div>
             </div>
