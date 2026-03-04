@@ -708,7 +708,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               data-testid="button-run-pipeline"
               onClick={handleRunPipeline}
               disabled={pipelineRunning || negAccounts.length === 0}
-              className="px-5 py-2.5 bg-green-600 text-foreground font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+              className="px-5 py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
             >
               {pipelineRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
               {pipelineRunning ? "Running Pipeline..." : "Run Full Analysis"}
@@ -894,7 +894,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <button
             data-testid="button-complete-scan"
             onClick={completeScan}
-            className="px-6 py-3 bg-green-600 text-foreground font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
+            className="px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
           >
             <CheckCircle2 className="w-4 h-4" /> Mark Complete
           </button>

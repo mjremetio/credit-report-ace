@@ -263,7 +263,7 @@ export default function ReviewDashboard() {
             </p>
             <button
               onClick={() => setShowApprovalModal(true)}
-              className="px-8 py-3 bg-green-600 text-foreground font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
+              className="px-8 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
             >
               <Shield className="w-5 h-5" /> Approve & Finalize Report
             </button>

@@ -40,22 +40,22 @@
   --radius: 0.5rem;
 
   --background: 0 0% 100%;
-  --foreground: 220 14% 10%;
+  --foreground: 220 14% 20%;
 
   --card: 0 0% 100%;
-  --card-foreground: 220 14% 10%;
+  --card-foreground: 220 14% 20%;
 
   --popover: 0 0% 100%;
-  --popover-foreground: 220 14% 10%;
+  --popover-foreground: 220 14% 20%;
 
   --primary: 220 70% 50%;
   --primary-foreground: 0 0% 100%;
 
   --secondary: 220 14% 96%;
-  --secondary-foreground: 220 14% 10%;
+  --secondary-foreground: 220 14% 20%;
 
   --muted: 220 14% 96%;
-  --muted-foreground: 220 10% 46%;
+  --muted-foreground: 220 10% 55%;
 
   --accent: 220 70% 50%;
   --accent-foreground: 0 0% 100%;
