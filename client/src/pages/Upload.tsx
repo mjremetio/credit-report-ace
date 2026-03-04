@@ -1182,6 +1182,7 @@ function TriBureauSummaryTable({
     { label: "Total Accounts", key: "totalAccounts" },
     { label: "Open Accounts", key: "openAccounts" },
     { label: "Closed Accounts", key: "closedAccounts" },
+    { label: "Delinquent", key: "delinquentCount", highlight: true },
     { label: "Derogatory", key: "derogatoryCount", highlight: true },
     { label: "Collections", key: "collectionsCount", highlight: true },
     { label: "Public Records", key: "publicRecordsCount" },

@@ -260,9 +260,9 @@ function testValidateAndNormalize() {
       ],
     },
     bureauSummaries: [
-      { bureau: "TransUnion", totalAccounts: 15, openAccounts: 8, closedAccounts: 7, derogatoryCount: 3, collectionsCount: 2, publicRecordsCount: 0, inquiriesCount: 4, balanceTotal: 45200, creditLimitTotal: 62000, monthlyPaymentTotal: 1250 },
-      { bureau: "Experian", totalAccounts: 14, openAccounts: 7, closedAccounts: 7, derogatoryCount: 3, collectionsCount: 2, publicRecordsCount: 0, inquiriesCount: 3, balanceTotal: 44800, creditLimitTotal: 62000, monthlyPaymentTotal: 1250 },
-      { bureau: "Equifax", totalAccounts: 15, openAccounts: 8, closedAccounts: 7, derogatoryCount: 3, collectionsCount: 1, publicRecordsCount: 0, inquiriesCount: 2, balanceTotal: 45500, creditLimitTotal: 62000, monthlyPaymentTotal: 1250 },
+      { bureau: "TransUnion", totalAccounts: 15, openAccounts: 8, closedAccounts: 7, delinquentCount: 0, derogatoryCount: 3, collectionsCount: 2, publicRecordsCount: 0, inquiriesCount: 4, balanceTotal: 45200, creditLimitTotal: 62000, monthlyPaymentTotal: 1250 },
+      { bureau: "Experian", totalAccounts: 14, openAccounts: 7, closedAccounts: 7, delinquentCount: 0, derogatoryCount: 3, collectionsCount: 2, publicRecordsCount: 0, inquiriesCount: 3, balanceTotal: 44800, creditLimitTotal: 62000, monthlyPaymentTotal: 1250 },
+      { bureau: "Equifax", totalAccounts: 15, openAccounts: 8, closedAccounts: 7, delinquentCount: 0, derogatoryCount: 3, collectionsCount: 1, publicRecordsCount: 0, inquiriesCount: 2, balanceTotal: 45500, creditLimitTotal: 62000, monthlyPaymentTotal: 1250 },
     ],
     tradelines: [
       {

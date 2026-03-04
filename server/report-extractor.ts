@@ -143,6 +143,10 @@ IMPORTANT:
 
 const SUMMARY_EXTRACTION_PROMPT = `Extract the per-bureau account summary statistics from this credit report section.
 
+IMPORTANT: "DELINQUENT" and "DEROGATORY" are separate categories. Extract both counts separately.
+- DELINQUENT = accounts currently late on payments but not yet charged off
+- DEROGATORY = accounts that are charged off, in collections, or have severe negative marks
+
 Return JSON:
 {
   "bureauSummaries": [
@@ -151,6 +155,7 @@ Return JSON:
       "totalAccounts": 25,
       "openAccounts": 10,
       "closedAccounts": 15,
+      "delinquentCount": 1,
       "derogatoryCount": 3,
       "collectionsCount": 2,
       "publicRecordsCount": 1,
@@ -482,7 +487,9 @@ function normalizeAccountStatus(raw: string | undefined): AccountStatus {
 
 function dedupeTradelineKey(t: LLMTradelineExtraction): string {
   const name = (t.creditorName || "").toLowerCase().trim().replace(/\s+/g, " ");
-  const acctNum = (t.accountNumberMasked || "").replace(/[^0-9*]/g, "");
+  // Preserve alphanumeric chars and asterisks for dedup key - some account numbers
+  // use letters (e.g., "FJB3OJ************"), stripping letters would cause collisions
+  const acctNum = (t.accountNumberMasked || "").replace(/[^a-zA-Z0-9*]/g, "").toLowerCase();
   return `${name}|${acctNum}`;
 }
 
@@ -541,6 +548,7 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
       totalAccounts: s.totalAccounts || 0,
       openAccounts: s.openAccounts || 0,
       closedAccounts: s.closedAccounts || 0,
+      delinquentCount: (s as any).delinquentCount || 0,
       derogatoryCount: s.derogatoryCount || 0,
       collectionsCount: s.collectionsCount || 0,
       publicRecordsCount: s.publicRecordsCount || 0,
@@ -695,6 +703,17 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
     };
   });
 
+  // ── Filter out ghost tradelines with all-null/empty data ──
+  const validTradelines = tradelines.filter(tl => {
+    // Keep if it has any meaningful bureau detail with actual data
+    const hasMeaningfulBureauData = tl.bureauDetails.some(bd =>
+      bd.accountNumber || bd.balance !== null || bd.status || bd.dateOpened ||
+      bd.highBalance !== null || bd.creditLimit !== null
+    );
+    // Keep if it has an account number, balance, or meaningful bureau data
+    return tl.accountNumberMasked || tl.balance !== null || hasMeaningfulBureauData;
+  });
+
   // ── Public Records ──
   const publicRecords: PublicRecord[] = raw.publicRecords.map(r => ({
     type: r.type || "Unknown",
@@ -739,7 +758,7 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
   return {
     profile,
     bureauSummaries: Array.from(summaryMap.values()),
-    tradelines,
+    tradelines: validTradelines,
     publicRecords,
     inquiries,
     consumerStatements,

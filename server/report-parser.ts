@@ -492,7 +492,7 @@ export function splitIntoSections(fullText: string): ReportSection[] {
     const end = i < headerMatches.length - 1 ? headerMatches[i + 1].index : fullText.length;
     const sectionText = fullText.slice(start, end).trim();
 
-    if (headerMatches[i].type === "tradeline" || headerMatches[i].type === "unknown") {
+    if (headerMatches[i].type === "tradeline") {
       // For tradeline sections, further split into individual account blocks
       const accountBlocks = splitTradelineSection(sectionText, start);
       sections.push(...accountBlocks);
