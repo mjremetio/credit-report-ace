@@ -12,9 +12,9 @@ export default function EvidenceTracker({ violations }: EvidenceTrackerProps) {
   const missing = withEvidence.length - provided;
 
   const getStatus = () => {
-    if (provided === withEvidence.length) return { label: "Complete", color: "text-green-400", icon: CheckCircle2 };
-    if (provided > 0) return { label: "Partial", color: "text-yellow-400", icon: AlertTriangle };
-    return { label: "Missing", color: "text-red-400", icon: XCircle };
+    if (provided === withEvidence.length) return { label: "Complete", color: "text-green-600", icon: CheckCircle2 };
+    if (provided > 0) return { label: "Partial", color: "text-yellow-600", icon: AlertTriangle };
+    return { label: "Missing", color: "text-red-600", icon: XCircle };
   };
 
   const status = getStatus();
@@ -23,7 +23,7 @@ export default function EvidenceTracker({ violations }: EvidenceTrackerProps) {
   return (
     <div className="bg-card border border-border rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-mono text-white flex items-center gap-2">
+        <h3 className="text-sm font-mono text-foreground flex items-center gap-2">
           <StatusIcon className={`w-4 h-4 ${status.color}`} />
           Evidence Status: {status.label}
         </h3>
@@ -41,13 +41,13 @@ export default function EvidenceTracker({ violations }: EvidenceTrackerProps) {
                 : "border-yellow-500/30 bg-yellow-500/10"
             }`}>
               {v.evidenceProvided ? (
-                <CheckCircle2 className="w-3 h-3 text-green-400" />
+                <CheckCircle2 className="w-3 h-3 text-green-600" />
               ) : (
-                <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                <span className="w-2 h-2 rounded-full bg-yellow-500" />
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-mono text-white truncate">{v.violationType}</p>
+              <p className="text-xs font-mono text-foreground truncate">{v.violationType}</p>
               <p className="text-[10px] font-mono text-muted-foreground truncate">{v.evidenceRequired}</p>
             </div>
             {v.evidenceNotes && (
@@ -58,7 +58,7 @@ export default function EvidenceTracker({ violations }: EvidenceTrackerProps) {
       </div>
 
       {missing > 0 && (
-        <p className="text-xs font-mono text-yellow-400 mt-3">
+        <p className="text-xs font-mono text-yellow-600 mt-3">
           {missing} evidence item{missing !== 1 ? "s" : ""} still needed for complete documentation.
         </p>
       )}

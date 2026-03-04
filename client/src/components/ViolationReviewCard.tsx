@@ -7,10 +7,10 @@ import {
 import { reviewViolation } from "@/lib/api";
 
 const REVIEW_STATUSES = [
-  { value: "confirmed", label: "Confirmed", icon: CheckCircle2, color: "text-green-400 border-green-500/30 bg-green-500/10" },
-  { value: "modified", label: "Modified", icon: AlertTriangle, color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10" },
-  { value: "rejected", label: "Rejected", icon: XCircle, color: "text-red-400 border-red-500/30 bg-red-500/10" },
-  { value: "needs_info", label: "Needs More Info", icon: Search, color: "text-blue-400 border-blue-500/30 bg-blue-500/10" },
+  { value: "confirmed", label: "Confirmed", icon: CheckCircle2, color: "text-green-600 border-green-500/30 bg-green-500/10" },
+  { value: "modified", label: "Modified", icon: AlertTriangle, color: "text-yellow-600 border-yellow-500/30 bg-yellow-500/10" },
+  { value: "rejected", label: "Rejected", icon: XCircle, color: "text-red-600 border-red-500/30 bg-red-500/10" },
+  { value: "needs_info", label: "Needs More Info", icon: Search, color: "text-blue-600 border-blue-500/30 bg-blue-500/10" },
 ];
 
 const SEVERITY_OPTIONS = ["critical", "high", "medium", "low"];
@@ -68,13 +68,13 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
   const isReviewed = reviewStatus !== "pending";
   const categoryLabel = violation.category === "FCRA_REPORTING" ? "FCRA Reporting" : "Debt Collector Conduct";
   const categoryColor = violation.category === "FCRA_REPORTING"
-    ? "border-blue-500/30 text-blue-400 bg-blue-500/10"
-    : "border-purple-500/30 text-purple-400 bg-purple-500/10";
+    ? "border-blue-500/30 text-blue-600 bg-blue-500/10"
+    : "border-purple-500/30 text-purple-600 bg-purple-500/10";
 
   const confidenceColors: Record<string, string> = {
-    confirmed: "text-green-400",
-    likely: "text-yellow-400",
-    possible: "text-orange-400",
+    confirmed: "text-green-600",
+    likely: "text-yellow-600",
+    possible: "text-orange-600",
   };
 
   return (
@@ -91,7 +91,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
           <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${categoryColor}`}>
             {categoryLabel}
           </span>
-          <span className="text-sm text-white font-medium truncate">{violation.violationType}</span>
+          <span className="text-sm text-foreground font-medium truncate">{violation.violationType}</span>
           {violation.confidence && (
             <span className={`text-[10px] font-mono ${confidenceColors[violation.confidence] || "text-muted-foreground"}`}>
               {violation.confidence}
@@ -138,14 +138,14 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                 <div className="mt-2 flex items-center gap-2">
                   <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
                     violation.evidenceProvided
-                      ? "border-green-500/30 text-green-400 bg-green-500/10"
-                      : "border-yellow-500/30 text-yellow-400 bg-yellow-500/10"
+                      ? "border-green-500/30 text-green-600 bg-green-500/10"
+                      : "border-yellow-500/30 text-yellow-600 bg-yellow-500/10"
                   }`}>
                     {violation.evidenceProvided ? "Provided" : "Missing"}
                   </span>
                 </div>
                 {reviewStatus === "confirmed" && !violation.evidenceProvided && (
-                  <p className="text-xs font-mono text-yellow-400 mt-2">
+                  <p className="text-xs font-mono text-yellow-600 mt-2">
                     This violation is confirmed but lacks supporting documentation. Strong violations require evidence for escalation.
                   </p>
                 )}
@@ -158,7 +158,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
             <div>
               <h4 className="text-xs font-mono text-primary mb-2">CRO REMINDER</h4>
               <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3">
-                <p className="text-xs font-mono text-yellow-400">{violation.croReminder}</p>
+                <p className="text-xs font-mono text-yellow-600">{violation.croReminder}</p>
               </div>
             </div>
           )}
@@ -196,7 +196,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                     <select
                       value={severityOverride}
                       onChange={(e) => setSeverityOverride(e.target.value)}
-                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
                     >
                       {SEVERITY_OPTIONS.map((s) => (
                         <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
@@ -209,7 +209,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                       value={descriptionOverride}
                       onChange={(e) => setDescriptionOverride(e.target.value)}
                       rows={3}
-                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-primary resize-none"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary resize-none"
                     />
                   </div>
                 </div>
@@ -224,7 +224,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                   onBlur={handleSaveNotes}
                   rows={2}
                   placeholder="Add CRO analysis or reasoning..."
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary resize-none"
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary resize-none"
                 />
               </div>
             </div>
@@ -234,7 +234,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
           {isLocked && isReviewed && (
             <div className="bg-secondary/30 border border-border rounded-lg p-3">
               <p className="text-xs font-mono text-muted-foreground">
-                <span className="text-white">Review:</span> {reviewStatus} {violation.reviewedBy ? `by ${violation.reviewedBy}` : ""}
+                <span className="text-foreground">Review:</span> {reviewStatus} {violation.reviewedBy ? `by ${violation.reviewedBy}` : ""}
                 {violation.reviewedAt ? ` on ${new Date(violation.reviewedAt).toLocaleDateString()}` : ""}
               </p>
               {notes && <p className="text-xs font-mono text-muted-foreground mt-1">Notes: {notes}</p>}
@@ -262,10 +262,10 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 function ReviewStatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; color: string }> = {
-    confirmed: { label: "Confirmed", color: "border-green-500/30 text-green-400 bg-green-500/10" },
-    modified: { label: "Modified", color: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10" },
-    rejected: { label: "Rejected", color: "border-red-500/30 text-red-400 bg-red-500/10" },
-    needs_info: { label: "Needs Info", color: "border-blue-500/30 text-blue-400 bg-blue-500/10" },
+    confirmed: { label: "Confirmed", color: "border-green-500/30 text-green-600 bg-green-500/10" },
+    modified: { label: "Modified", color: "border-yellow-500/30 text-yellow-600 bg-yellow-500/10" },
+    rejected: { label: "Rejected", color: "border-red-500/30 text-red-600 bg-red-500/10" },
+    needs_info: { label: "Needs Info", color: "border-blue-500/30 text-blue-600 bg-blue-500/10" },
     pending: { label: "Pending", color: "border-border text-muted-foreground bg-secondary" },
   };
   const info = map[status] || map.pending;

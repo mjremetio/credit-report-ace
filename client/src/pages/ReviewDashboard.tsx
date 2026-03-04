@@ -64,7 +64,7 @@ export default function ReviewDashboard() {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
-          <h2 className="font-display text-xl text-white mb-2">Scan Not Found</h2>
+          <h2 className="font-display text-xl text-foreground mb-2">Scan Not Found</h2>
           <button onClick={() => navigate("/")} className="text-primary font-mono text-sm hover:underline">Go Home</button>
         </div>
       </div>
@@ -90,12 +90,12 @@ export default function ReviewDashboard() {
 
   return (
     <div className="h-full">
-      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6 justify-between">
+      <header className="h-16 border-b border-border bg-white flex items-center px-6 justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => navigate(`/scan/${scanId}`)} className="text-muted-foreground hover:text-white transition-colors">
+          <button onClick={() => navigate(`/scan/${scanId}`)} className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="font-display font-medium text-lg text-white">Review Dashboard</h2>
+          <h2 className="font-display font-medium text-lg text-foreground">Review Dashboard</h2>
           <span className="text-xs font-mono text-muted-foreground">— {scan.consumerName}</span>
         </div>
         <div className="flex items-center gap-3">
@@ -106,7 +106,7 @@ export default function ReviewDashboard() {
                   reopenMutation.mutate();
                 }
               }}
-              className="px-4 py-2 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors inline-flex items-center gap-2 text-xs font-mono"
+              className="px-4 py-2 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors inline-flex items-center gap-2 text-xs font-mono"
             >
               <RotateCcw className="w-3.5 h-3.5" /> Reopen Review
             </button>
@@ -124,16 +124,16 @@ export default function ReviewDashboard() {
             className="bg-green-500/10 border border-green-500/30 rounded-xl p-5 flex items-center justify-between"
           >
             <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-6 h-6 text-green-400" />
+              <CheckCircle2 className="w-6 h-6 text-green-600" />
               <div>
-                <h3 className="text-sm font-mono text-green-400 font-medium">Report Approved</h3>
-                <p className="text-xs font-mono text-green-400/70">
+                <h3 className="text-sm font-mono text-green-600 font-medium">Report Approved</h3>
+                <p className="text-xs font-mono text-green-600/70">
                   Reviewed by {scan.reviewedBy} on {scan.reviewedAt ? new Date(scan.reviewedAt).toLocaleDateString() : "N/A"}
                   {scan.approvedViolationCount !== null && ` — ${scan.approvedViolationCount} violations approved, ${scan.rejectedViolationCount} rejected`}
                 </p>
               </div>
             </div>
-            <Lock className="w-5 h-5 text-green-400/50" />
+            <Lock className="w-5 h-5 text-green-600/50" />
           </motion.div>
         )}
 
@@ -145,13 +145,13 @@ export default function ReviewDashboard() {
             className="bg-primary/5 border border-primary/20 rounded-xl p-6 text-center"
           >
             <Shield className="w-10 h-10 text-primary mx-auto mb-3" />
-            <h3 className="font-display text-lg text-white mb-2">Ready for Review</h3>
+            <h3 className="font-display text-lg text-foreground mb-2">Ready for Review</h3>
             <p className="text-sm font-mono text-muted-foreground mb-4">
               {allViolations.length} violation{allViolations.length !== 1 ? "s" : ""} detected across {negAccounts.filter((a: any) => (a.violations || []).length > 0).length} account{negAccounts.filter((a: any) => (a.violations || []).length > 0).length !== 1 ? "s" : ""}. Review each violation to validate AI findings before export.
             </p>
             <button
               onClick={() => beginReviewMutation.mutate()}
-              className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+              className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
             >
               <Shield className="w-4 h-4" /> Begin Review
             </button>
@@ -161,8 +161,8 @@ export default function ReviewDashboard() {
         {/* No violations */}
         {allViolations.length === 0 && (
           <div className="bg-card border border-border rounded-xl p-8 text-center">
-            <CheckCircle2 className="w-10 h-10 text-green-400 mx-auto mb-3" />
-            <h3 className="font-display text-lg text-white mb-2">No Violations to Review</h3>
+            <CheckCircle2 className="w-10 h-10 text-green-600 mx-auto mb-3" />
+            <h3 className="font-display text-lg text-foreground mb-2">No Violations to Review</h3>
             <p className="text-sm font-mono text-muted-foreground">
               No violations were detected. Go back to scan more accounts or upload additional reports.
             </p>
@@ -183,7 +183,7 @@ export default function ReviewDashboard() {
               value={reviewerName}
               onChange={(e) => setReviewerName(e.target.value)}
               placeholder="Enter your name for review tracking..."
-              className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
+              className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
             />
           </div>
         )}
@@ -191,8 +191,8 @@ export default function ReviewDashboard() {
         {/* FCRA Violations Section */}
         {fcraViolations.length > 0 && (isUnderReview || isApproved) && (
           <div>
-            <h3 className="font-display text-lg text-white mb-4 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-blue-400" />
+            <h3 className="font-display text-lg text-foreground mb-4 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-blue-600" />
               FCRA Reporting Violations ({fcraViolations.length})
             </h3>
             <div className="space-y-3">
@@ -212,8 +212,8 @@ export default function ReviewDashboard() {
         {/* FDCPA Violations Section */}
         {fdcpaViolations.length > 0 && (isUnderReview || isApproved) && (
           <div>
-            <h3 className="font-display text-lg text-white mb-4 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-purple-400" />
+            <h3 className="font-display text-lg text-foreground mb-4 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-purple-600" />
               Debt Collector Conduct Violations ({fdcpaViolations.length})
             </h3>
             <div className="space-y-3">
@@ -255,15 +255,15 @@ export default function ReviewDashboard() {
             animate={{ opacity: 1, y: 0 }}
             className="bg-green-500/5 border border-green-500/20 rounded-xl p-6 text-center"
           >
-            <CheckCircle2 className="w-8 h-8 text-green-400 mx-auto mb-3" />
-            <h3 className="font-display text-lg text-white mb-2">All Violations Reviewed</h3>
+            <CheckCircle2 className="w-8 h-8 text-green-600 mx-auto mb-3" />
+            <h3 className="font-display text-lg text-foreground mb-2">All Violations Reviewed</h3>
             <p className="text-sm font-mono text-muted-foreground mb-4">
               {summary.confirmed + summary.modified} violation{summary.confirmed + summary.modified !== 1 ? "s" : ""} will be included in the final report.
               {summary.rejected > 0 && ` ${summary.rejected} rejected and excluded.`}
             </p>
             <button
               onClick={() => setShowApprovalModal(true)}
-              className="px-8 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
+              className="px-8 py-3 bg-green-600 text-foreground font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
             >
               <Shield className="w-5 h-5" /> Approve & Finalize Report
             </button>

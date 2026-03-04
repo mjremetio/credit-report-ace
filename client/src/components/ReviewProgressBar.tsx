@@ -22,11 +22,11 @@ export default function ReviewProgressBar({ scanId }: ReviewProgressBarProps) {
   return (
     <div className="bg-card border border-border rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-mono text-white">
+        <h3 className="text-sm font-mono text-foreground">
           Review Progress: {reviewed} of {summary.total} violations reviewed [{percent}%]
         </h3>
         {!allReviewed && (
-          <span className="text-xs font-mono text-yellow-400">Review all violations to unlock export</span>
+          <span className="text-xs font-mono text-yellow-600">Review all violations to unlock export</span>
         )}
       </div>
 
@@ -40,10 +40,10 @@ export default function ReviewProgressBar({ scanId }: ReviewProgressBarProps) {
 
       {/* Status breakdown */}
       <div className="flex flex-wrap gap-4">
-        <StatusItem icon={CheckCircle2} label="Confirmed" count={summary.confirmed} color="text-green-400" />
-        <StatusItem icon={AlertTriangle} label="Modified" count={summary.modified} color="text-yellow-400" />
-        <StatusItem icon={XCircle} label="Rejected" count={summary.rejected} color="text-red-400" />
-        <StatusItem icon={Search} label="Needs Info" count={summary.needsInfo} color="text-blue-400" />
+        <StatusItem icon={CheckCircle2} label="Confirmed" count={summary.confirmed} color="text-green-600" />
+        <StatusItem icon={AlertTriangle} label="Modified" count={summary.modified} color="text-yellow-600" />
+        <StatusItem icon={XCircle} label="Rejected" count={summary.rejected} color="text-red-600" />
+        <StatusItem icon={Search} label="Needs Info" count={summary.needsInfo} color="text-blue-600" />
         <StatusItem icon={Clock} label="Pending" count={summary.pending} color="text-muted-foreground" />
       </div>
     </div>

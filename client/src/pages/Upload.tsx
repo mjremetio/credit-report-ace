@@ -250,8 +250,8 @@ export default function Upload() {
 
   return (
     <div className="h-full">
-      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6">
-        <h2 className="font-display font-medium text-lg text-white">Upload Credit Report</h2>
+      <header className="h-16 border-b border-border bg-white flex items-center px-6">
+        <h2 className="font-display font-medium text-lg text-foreground">Upload Credit Report</h2>
       </header>
 
       <div className="p-6 max-w-4xl mx-auto mt-6 space-y-6">
@@ -285,7 +285,7 @@ export default function Upload() {
                 className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 font-medium text-sm transition-colors ${
                   inputMode === "file"
                     ? "bg-primary/10 text-primary border-b-2 border-primary"
-                    : "bg-card text-muted-foreground hover:text-white hover:bg-secondary"
+                    : "bg-card text-muted-foreground hover:text-foreground hover:bg-secondary"
                 }`}
               >
                 <UploadCloud className="w-4 h-4" />
@@ -297,7 +297,7 @@ export default function Upload() {
                 className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 font-medium text-sm transition-colors ${
                   inputMode === "text"
                     ? "bg-primary/10 text-primary border-b-2 border-primary"
-                    : "bg-card text-muted-foreground hover:text-white hover:bg-secondary"
+                    : "bg-card text-muted-foreground hover:text-foreground hover:bg-secondary"
                 }`}
               >
                 <Type className="w-4 h-4" />
@@ -317,7 +317,7 @@ export default function Upload() {
                 <div className="p-4 rounded-full mb-4 bg-secondary text-muted-foreground">
                   <UploadCloud className="w-8 h-8" />
                 </div>
-                <h3 className="font-display text-xl font-medium mb-2 text-white">
+                <h3 className="font-display text-xl font-medium mb-2 text-foreground">
                   Upload Credit Report File
                 </h3>
                 <p className="text-muted-foreground max-w-md font-mono text-sm">
@@ -335,7 +335,7 @@ export default function Upload() {
                     <Type className="w-5 h-5 text-primary" />
                   </div>
                   <div>
-                    <h3 className="font-display text-lg text-white">Paste Credit Report Text</h3>
+                    <h3 className="font-display text-lg text-foreground">Paste Credit Report Text</h3>
                     <p className="text-xs font-mono text-muted-foreground">
                       Paste or type the raw text from a credit report below
                     </p>
@@ -348,7 +348,7 @@ export default function Upload() {
                   onChange={(e) => setRawText(e.target.value)}
                   rows={14}
                   placeholder={"Paste credit report text here...\n\ne.g.\nConsumer: John Doe\nSSN: XXX-XX-1234\nTransUnion Score: 620\nExperian Score: 635\nEquifax Score: 610\n\nACCOUNT INFORMATION\nCreditor: ABC Collections\nAccount#: ****5678\nType: Collection\nBalance: $1,250\n..."}
-                  className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/30 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
+                  className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/30 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
                   spellCheck={false}
                 />
 
@@ -356,14 +356,14 @@ export default function Upload() {
                   <span className="text-xs font-mono text-muted-foreground">
                     {rawText.length.toLocaleString()} characters
                     {rawText.trim().length > 0 && rawText.trim().length < 50 && (
-                      <span className="text-yellow-400 ml-2">(min 50 characters required)</span>
+                      <span className="text-yellow-600 ml-2">(min 50 characters required)</span>
                     )}
                   </span>
                   <button
                     data-testid="button-submit-text"
                     onClick={handleManualTextSubmit}
                     disabled={rawText.trim().length < 50}
-                    className="px-6 py-2.5 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+                    className="px-6 py-2.5 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
                   >
                     <ArrowRight className="w-4 h-4" />
                     Review & Proceed
@@ -373,7 +373,7 @@ export default function Upload() {
             )}
 
             <div className="mt-6 bg-card border border-border rounded-xl p-5">
-              <h4 className="font-display text-white text-sm mb-3">Upload Workflow</h4>
+              <h4 className="font-display text-foreground text-sm mb-3">Upload Report</h4>
               <div className="space-y-3">
                 {[
                   { step: 1, text: "Upload file or paste raw credit report text" },
@@ -403,11 +403,10 @@ export default function Upload() {
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="relative border-2 border-dashed border-primary rounded-xl p-12 flex flex-col items-center justify-center text-center bg-card overflow-hidden">
-              <div className="scan-line" />
               <div className="p-4 rounded-full mb-4 bg-primary/20 text-primary">
                 <Activity className="w-8 h-8 animate-pulse" />
               </div>
-              <h3 className="font-display text-xl font-medium mb-2 text-white">
+              <h3 className="font-display text-xl font-medium mb-2 text-foreground">
                 Extracting Text...
               </h3>
               <p className="text-muted-foreground max-w-md font-mono text-sm">
@@ -445,14 +444,14 @@ export default function Upload() {
                     <Eye className="w-5 h-5 text-primary" />
                   </div>
                   <div>
-                    <h3 className="font-display text-lg text-white">Review Extracted Data</h3>
+                    <h3 className="font-display text-lg text-foreground">Review Extracted Data</h3>
                     <p className="text-xs font-mono text-muted-foreground">
                       {fileName} — {rawText.length.toLocaleString()} characters extracted
                     </p>
                   </div>
                 </div>
                 {isEdited && (
-                  <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-400 bg-yellow-500/10">
+                  <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-600 bg-yellow-500/10">
                     <Edit3 className="w-3 h-3 inline mr-1" />edited
                   </span>
                 )}
@@ -471,7 +470,7 @@ export default function Upload() {
                   setIsEdited(true);
                 }}
                 rows={20}
-                className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
+                className="w-full bg-[#0a0a0c] border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/50 font-mono text-xs leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
                 spellCheck={false}
               />
 
@@ -493,7 +492,7 @@ export default function Upload() {
                 data-testid="button-proceed-structuring"
                 onClick={handleProceedToStructuring}
                 disabled={rawText.trim().length < 50}
-                className="flex-1 px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                className="flex-1 px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
                 <ArrowRight className="w-4 h-4" />
                 Structure into JSON
@@ -501,7 +500,7 @@ export default function Upload() {
               <button
                 data-testid="button-start-over"
                 onClick={handleReset}
-                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors font-mono text-sm inline-flex items-center gap-2"
+                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors font-mono text-sm inline-flex items-center gap-2"
               >
                 <RotateCcw className="w-4 h-4" />
                 Start Over
@@ -517,11 +516,10 @@ export default function Upload() {
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="relative border-2 border-dashed border-primary rounded-xl p-12 flex flex-col items-center justify-center text-center bg-card overflow-hidden">
-              <div className="scan-line" />
               <div className="p-4 rounded-full mb-4 bg-primary/20 text-primary">
                 <Activity className="w-8 h-8 animate-pulse" />
               </div>
-              <h3 className="font-display text-xl font-medium mb-2 text-white">
+              <h3 className="font-display text-xl font-medium mb-2 text-foreground">
                 Structuring Report...
               </h3>
               <p className="text-muted-foreground max-w-md font-mono text-sm">
@@ -560,7 +558,7 @@ export default function Upload() {
                 </div>
                 <div className="flex-1">
                   <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Consumer</p>
-                  <h3 className="font-display text-2xl text-white" data-testid="consumer-name-display">
+                  <h3 className="font-display text-2xl text-foreground" data-testid="consumer-name-display">
                     {organizedReport?.personalInformation?.name || structureResult.consumerName || "Unknown Consumer"}
                   </h3>
                   {organizedReport?.personalInformation?.aliases?.length > 0 && (
@@ -569,17 +567,17 @@ export default function Upload() {
                     </p>
                   )}
                 </div>
-                <CheckCircle2 className="w-8 h-8 text-green-400" />
+                <CheckCircle2 className="w-8 h-8 text-green-600" />
               </div>
 
               {/* Summary Stats */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
-                  <div className="text-2xl font-display text-white">{structureResult.tradelineCount}</div>
+                  <div className="text-2xl font-display text-foreground">{structureResult.tradelineCount}</div>
                   <div className="text-xs font-mono text-muted-foreground mt-1">Tradelines</div>
                 </div>
                 <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
-                  <div className="text-2xl font-display text-white">{structureResult.issueFlagsDetected || 0}</div>
+                  <div className="text-2xl font-display text-foreground">{structureResult.issueFlagsDetected || 0}</div>
                   <div className="text-xs font-mono text-muted-foreground mt-1">Issue Flags</div>
                 </div>
               </div>
@@ -622,7 +620,7 @@ export default function Upload() {
                         </p>
                         <div className="space-y-1">
                           {organizedReport.personalInformation.addresses.map((addr: any, i: number) => (
-                            <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono text-white flex items-center justify-between">
+                            <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono text-foreground flex items-center justify-between">
                               <span>{addr.address}</span>
                               <span className="text-muted-foreground text-[10px]">{addr.bureaus?.join(", ")}</span>
                             </div>
@@ -638,7 +636,7 @@ export default function Upload() {
                         </p>
                         <div className="space-y-1">
                           {organizedReport.personalInformation.employers.map((emp: any, i: number) => (
-                            <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono text-white flex items-center justify-between">
+                            <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono text-foreground flex items-center justify-between">
                               <span>{emp.name}</span>
                               <span className="text-muted-foreground text-[10px]">{emp.bureaus?.join(", ")}</span>
                             </div>
@@ -663,7 +661,7 @@ export default function Upload() {
                       return (
                         <div key={bureau} className="bg-background/30 border border-border rounded-lg p-4 text-center">
                           <p className="text-xs font-mono text-muted-foreground mb-1">{bureau}</p>
-                          <p className={`text-3xl font-display ${scoreData?.score ? "text-white" : "text-muted-foreground/50"}`}>
+                          <p className={`text-3xl font-display ${scoreData?.score ? "text-foreground" : "text-muted-foreground/50"}`}>
                             {scoreData?.score ?? "N/A"}
                           </p>
                           {scoreData?.model && (
@@ -702,9 +700,9 @@ export default function Upload() {
                         {organizedReport.accountSummary.perBureau.map((bs: any, i: number) => (
                           <div key={i} className="bg-background/30 border border-border rounded p-2 text-[11px] font-mono">
                             <p className="text-primary font-medium mb-1">{bs.bureau}</p>
-                            <p className="text-muted-foreground">Accounts: <span className="text-white">{bs.totalAccounts}</span></p>
+                            <p className="text-muted-foreground">Accounts: <span className="text-foreground">{bs.totalAccounts}</span></p>
                             <p className="text-muted-foreground">Derogatory: <span className="text-destructive">{bs.derogatoryCount}</span></p>
-                            <p className="text-muted-foreground">Collections: <span className="text-yellow-400">{bs.collectionsCount}</span></p>
+                            <p className="text-muted-foreground">Collections: <span className="text-yellow-600">{bs.collectionsCount}</span></p>
                           </div>
                         ))}
                       </div>
@@ -761,7 +759,7 @@ export default function Upload() {
                       {organizedReport.publicInformation.map((pr: any, i: number) => (
                         <div key={i} className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
                           <div className="flex justify-between items-center">
-                            <span className="text-white font-medium">{pr.type}</span>
+                            <span className="text-foreground font-medium">{pr.type}</span>
                             <span className="text-muted-foreground">{pr.bureaus?.join(", ")}</span>
                           </div>
                           {pr.court && <p className="text-muted-foreground mt-1">Court: {pr.court}</p>}
@@ -787,7 +785,7 @@ export default function Upload() {
                     <div className="space-y-1 max-h-64 overflow-y-auto">
                       {organizedReport.inquiries.map((inq: any, i: number) => (
                         <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono flex items-center justify-between">
-                          <span className="text-white">{inq.creditorName}</span>
+                          <span className="text-foreground">{inq.creditorName}</span>
                           <div className="flex items-center gap-3">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                               inq.type === "hard"
@@ -823,7 +821,7 @@ export default function Upload() {
                             <span className="text-primary">{stmt.bureau}</span>
                             {stmt.dateAdded && <span className="text-muted-foreground">{stmt.dateAdded}</span>}
                           </div>
-                          <p className="text-white">{stmt.statement}</p>
+                          <p className="text-foreground">{stmt.statement}</p>
                         </div>
                       ))}
                     </div>
@@ -843,7 +841,7 @@ export default function Upload() {
               <button
                 data-testid="button-run-violations"
                 onClick={handleProceedToViolations}
-                className="flex-1 px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
+                className="flex-1 px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
               >
                 <Shield className="w-4 h-4" />
                 Run Violation Analysis
@@ -851,7 +849,7 @@ export default function Upload() {
               <button
                 data-testid="button-start-over-structured"
                 onClick={handleReset}
-                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors font-mono text-sm inline-flex items-center gap-2"
+                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors font-mono text-sm inline-flex items-center gap-2"
               >
                 <RotateCcw className="w-4 h-4" />
                 Start Over
@@ -867,11 +865,10 @@ export default function Upload() {
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="relative border-2 border-dashed border-primary rounded-xl p-12 flex flex-col items-center justify-center text-center bg-card overflow-hidden">
-              <div className="scan-line" />
               <div className="p-4 rounded-full mb-4 bg-destructive/20 text-destructive">
                 <Shield className="w-8 h-8 animate-pulse" />
               </div>
-              <h3 className="font-display text-xl font-medium mb-2 text-white">
+              <h3 className="font-display text-xl font-medium mb-2 text-foreground">
                 Running Violation Analysis...
               </h3>
               <p className="text-muted-foreground max-w-md font-mono text-sm">
@@ -904,12 +901,12 @@ export default function Upload() {
           >
             <div className="bg-card border border-green-500/30 rounded-xl p-6">
               <div className="flex items-center gap-4 mb-4">
-                <CheckCircle2 className="w-10 h-10 text-green-400" />
+                <CheckCircle2 className="w-10 h-10 text-green-600" />
                 <div className="flex-1">
-                  <h3 className="font-display text-xl text-white">Analysis Complete</h3>
+                  <h3 className="font-display text-xl text-foreground">Analysis Complete</h3>
                   <div className="flex items-center gap-2 mt-1">
                     <User className="w-4 h-4 text-primary" />
-                    <span className="text-white font-display text-lg" data-testid="consumer-name-complete">
+                    <span className="text-foreground font-display text-lg" data-testid="consumer-name-complete">
                       {organizedReport?.personalInformation?.name || structureResult.consumerName || "Unknown Consumer"}
                     </span>
                   </div>
@@ -925,39 +922,39 @@ export default function Upload() {
                 <div className="p-2 rounded-lg bg-primary/10 inline-block mb-3">
                   <FileText className="w-5 h-5 text-primary" />
                 </div>
-                <div className="text-3xl font-display text-white">{structureResult.tradelineCount}</div>
+                <div className="text-3xl font-display text-foreground">{structureResult.tradelineCount}</div>
                 <div className="text-xs font-mono text-muted-foreground mt-1">Tradelines Extracted</div>
               </div>
               <div className="bg-card border border-border rounded-xl p-5">
                 <div className="p-2 rounded-lg bg-destructive/10 inline-block mb-3">
                   <AlertTriangle className="w-5 h-5 text-destructive" />
                 </div>
-                <div className="text-3xl font-display text-white">{violationResult?.violationsFound || 0}</div>
+                <div className="text-3xl font-display text-foreground">{violationResult?.violationsFound || 0}</div>
                 <div className="text-xs font-mono text-muted-foreground mt-1">Violations Detected</div>
               </div>
               <div className="bg-card border border-border rounded-xl p-5">
                 <div className="p-2 rounded-lg bg-yellow-500/10 inline-block mb-3">
-                  <Shield className="w-5 h-5 text-yellow-400" />
+                  <Shield className="w-5 h-5 text-yellow-600" />
                 </div>
-                <div className="text-3xl font-display text-white">{structureResult.issueFlagsDetected || 0}</div>
+                <div className="text-3xl font-display text-foreground">{structureResult.issueFlagsDetected || 0}</div>
                 <div className="text-xs font-mono text-muted-foreground mt-1">Issue Flags</div>
               </div>
             </div>
 
             {/* Next Steps in Workflow */}
             <div className="bg-card border border-border rounded-xl p-5">
-              <h4 className="font-display text-white text-sm mb-3">Completed Steps</h4>
+              <h4 className="font-display text-foreground text-sm mb-3">Completed Steps</h4>
               <div className="space-y-2 text-xs font-mono text-muted-foreground">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
                   <span>Text extracted & reviewed</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
                   <span>Structured JSON created (TransUnion, Experian, Equifax)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
                   <span>AI violation analysis complete</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -975,7 +972,7 @@ export default function Upload() {
               <button
                 data-testid="button-view-review"
                 onClick={() => navigate(`/review/${structureResult.scanId}`)}
-                className="flex-1 px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
+                className="flex-1 px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
               >
                 <ClipboardCheck className="w-4 h-4" />
                 Paralegal Review
@@ -991,14 +988,14 @@ export default function Upload() {
               <button
                 data-testid="button-view-scan"
                 onClick={() => navigate(`/scan/${structureResult.scanId}`)}
-                className="px-6 py-3 bg-secondary border border-border text-white rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2"
+                className="px-6 py-3 bg-secondary border border-border text-foreground rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2"
               >
                 View Scan Details
               </button>
               <button
                 data-testid="button-upload-another"
                 onClick={handleReset}
-                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors font-mono text-sm"
+                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors font-mono text-sm"
               >
                 Upload Another
               </button>
@@ -1018,7 +1015,7 @@ export default function Upload() {
               {logs.map((log, i) => (
                 <div key={i} className="mb-1 flex">
                   <span className="text-primary/70 mr-2">&rsaquo;</span>
-                  <span className={log.includes("ERROR") ? "text-destructive" : log.includes("COMPLETE") ? "text-green-400" : ""}>
+                  <span className={log.includes("ERROR") ? "text-destructive" : log.includes("COMPLETE") ? "text-green-600" : ""}>
                     {log}
                   </span>
                 </div>
@@ -1051,7 +1048,7 @@ function StructuredSection({
       >
         <div className="flex items-center gap-2">
           {icon}
-          <span className="font-display text-sm text-white">{title}</span>
+          <span className="font-display text-sm text-foreground">{title}</span>
         </div>
         {expanded ? (
           <ChevronUp className="w-4 h-4 text-muted-foreground" />
@@ -1088,7 +1085,7 @@ function InfoField({
       <p className="text-[10px] font-mono text-muted-foreground flex items-center gap-1 mb-0.5">
         {icon} {label}
       </p>
-      <p className="text-xs font-mono text-white">{value || "N/A"}</p>
+      <p className="text-xs font-mono text-foreground">{value || "N/A"}</p>
     </div>
   );
 }
@@ -1102,7 +1099,7 @@ function SummaryCard({
 }) {
   return (
     <div className="bg-background/30 border border-border rounded-lg p-3 text-center">
-      <div className={`text-xl font-display ${highlight ? "text-destructive" : "text-white"}`}>
+      <div className={`text-xl font-display ${highlight ? "text-destructive" : "text-foreground"}`}>
         {value ?? 0}
       </div>
       <div className="text-[10px] font-mono text-muted-foreground mt-1">{label}</div>
@@ -1112,10 +1109,10 @@ function SummaryCard({
 
 function TradelineRow({ tradeline }: { tradeline: any }) {
   const statusColors: Record<string, string> = {
-    current: "text-green-400 bg-green-500/10 border-green-500/30",
+    current: "text-green-600 bg-green-500/10 border-green-500/30",
     closed: "text-muted-foreground bg-secondary border-border",
-    paid: "text-green-400 bg-green-500/10 border-green-500/30",
-    late: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
+    paid: "text-green-600 bg-green-500/10 border-green-500/30",
+    late: "text-yellow-600 bg-yellow-500/10 border-yellow-500/30",
     chargeoff: "text-destructive bg-destructive/10 border-destructive/30",
     collection: "text-destructive bg-destructive/10 border-destructive/30",
     derogatory: "text-destructive bg-destructive/10 border-destructive/30",
@@ -1127,7 +1124,7 @@ function TradelineRow({ tradeline }: { tradeline: any }) {
   return (
     <div className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-white font-medium">{tradeline.creditorName}</span>
+        <span className="text-foreground font-medium">{tradeline.creditorName}</span>
         <span className={`px-1.5 py-0.5 rounded text-[10px] border ${statusClass}`}>
           {tradeline.aggregateStatus}
         </span>
