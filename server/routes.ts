@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import multer from "multer";
 import { z } from "zod";
+import PDFDocument from "pdfkit";
 import { storage } from "./storage";
 import { detectViolations } from "./ai-services";
 import { runReportPipeline, organizeReport, runManualEntryPipeline, runStructurePipeline, runViolationPipeline } from "./report-pipeline";
@@ -736,63 +737,115 @@ export async function registerRoutes(
         low: includedViolations.filter(v => (v.severityOverride || v.severity) === "low").length,
       };
 
-      // Build PDF-like JSON response (actual PDF generation would use pdfkit)
-      const pdfData = {
-        title: scan.reportTitle || "LEXA — FCRA Violation Report",
-        scanName: scan.consumerName,
-        clientName: scan.clientName || scan.consumerName,
-        clientState: scan.clientState,
-        date: new Date().toISOString(),
-        reviewStamp: scan.reviewedBy
-          ? `Reviewed and Approved by ${scan.reviewedBy} on ${scan.reviewedAt ? new Date(scan.reviewedAt).toLocaleDateString() : "N/A"}`
-          : "Pending review",
-        summary: {
-          totalAccounts: negAccounts.length,
-          totalViolations: includedViolations.length,
-          severityBreakdown,
-        },
-        accounts: accountsWithViolations.map(a => ({
-          creditor: a.creditor,
-          accountNumber: a.accountNumber,
-          accountType: a.accountType,
-          originalCreditor: a.originalCreditor,
-          balance: a.balance,
-          status: a.status,
-          dateOpened: a.dateOpened,
-          dateOfDelinquency: a.dateOfDelinquency,
-          bureaus: a.bureaus,
-          violations: a.violations
-            .filter(v => v.reviewStatus !== "rejected")
-            .map(v => ({
-              violationType: v.violationType,
-              severity: v.severityOverride || v.severity,
-              description: v.descriptionOverride || v.explanation,
-              fcraStatute: v.fcraStatute,
-              evidence: v.evidence,
-              category: v.category,
-              confidence: v.confidence,
-              evidenceRequired: v.evidenceRequired,
-              evidenceStatus: v.evidenceProvided ? "Provided" : "Missing",
-              evidenceNotes: v.evidenceNotes,
-              croReminder: v.croReminder,
-              reviewStatus: v.reviewStatus || "pending",
-              reviewerNotes: v.reviewerNotes,
-              paralegalNotes: v.paralegalNotes,
-            })),
-        })),
-        reviewNotes: scan.reviewNotes,
-        disclaimer: scan.reviewedBy
-          ? "This report has been reviewed by a human analyst. The information is provided for dispute purposes only."
-          : "This report has not yet been reviewed by a human analyst. The violations listed are AI-detected and pending review.",
+      const title = scan.reportTitle || "LEXA — FCRA Violation Report";
+      const clientName = scan.clientName || scan.consumerName;
+      const reviewStamp = scan.reviewedBy
+        ? `Reviewed and Approved by ${scan.reviewedBy} on ${scan.reviewedAt ? new Date(scan.reviewedAt).toLocaleDateString() : "N/A"}`
+        : "Pending review";
+      const disclaimer = scan.reviewedBy
+        ? "This report has been reviewed by a human analyst. The information is provided for dispute purposes only."
+        : "This report has not yet been reviewed by a human analyst. The violations listed are AI-detected and pending review.";
+
+      // Generate actual PDF using pdfkit
+      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+      const pdfReady = new Promise<Buffer>((resolve, reject) => {
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+      });
+
+      // Title
+      doc.fontSize(20).font("Helvetica-Bold").text(title, { align: "center" });
+      doc.moveDown(0.5);
+
+      // Meta info
+      doc.fontSize(10).font("Helvetica")
+        .text(`Consumer: ${scan.consumerName}`)
+        .text(`Client: ${clientName}`)
+        .text(`State: ${scan.clientState || "N/A"}`)
+        .text(`Date: ${new Date().toLocaleDateString()}`)
+        .text(`Status: ${reviewStamp}`);
+      doc.moveDown();
+
+      // Summary
+      doc.fontSize(14).font("Helvetica-Bold").text("Summary");
+      doc.fontSize(10).font("Helvetica")
+        .text(`Total Accounts: ${negAccounts.length}`)
+        .text(`Total Violations: ${includedViolations.length}`)
+        .text(`Critical: ${severityBreakdown.critical}  |  High: ${severityBreakdown.high}  |  Medium: ${severityBreakdown.medium}  |  Low: ${severityBreakdown.low}`);
+      doc.moveDown();
+
+      // Horizontal rule helper
+      const drawRule = () => {
+        doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke("#cccccc");
+        doc.moveDown(0.5);
       };
+
+      // Accounts & Violations
+      for (const acct of accountsWithViolations) {
+        const acctViolations = acct.violations.filter(v => v.reviewStatus !== "rejected");
+        if (acctViolations.length === 0) continue;
+
+        drawRule();
+        doc.fontSize(12).font("Helvetica-Bold")
+          .text(`${acct.creditor || "Unknown Creditor"}`, { continued: false });
+        doc.fontSize(9).font("Helvetica")
+          .text(`Account #: ${acct.accountNumber || "N/A"}  |  Type: ${formatAccountType(acct.accountType)}  |  Balance: ${acct.balance || "N/A"}`)
+          .text(`Status: ${acct.status || "N/A"}  |  Bureaus: ${acct.bureaus || "N/A"}`);
+        doc.moveDown(0.3);
+
+        for (const v of acctViolations) {
+          const severity = v.severityOverride || v.severity;
+          const description = v.descriptionOverride || v.explanation;
+
+          doc.fontSize(10).font("Helvetica-Bold")
+            .text(`• ${v.violationType}`, { continued: false });
+          doc.fontSize(9).font("Helvetica")
+            .text(`Severity: ${severity}  |  Category: ${v.category || "N/A"}  |  Confidence: ${v.confidence || "N/A"}`)
+            .text(`FCRA Statute: ${v.fcraStatute || "N/A"}`);
+          if (description) {
+            doc.text(`Description: ${description}`);
+          }
+          if (v.evidence) {
+            doc.text(`Evidence: ${v.evidence}`);
+          }
+          if (v.reviewerNotes) {
+            doc.text(`Reviewer Notes: ${v.reviewerNotes}`);
+          }
+          if (v.paralegalNotes) {
+            doc.text(`Paralegal Notes: ${v.paralegalNotes}`);
+          }
+          doc.moveDown(0.3);
+        }
+        doc.moveDown(0.3);
+      }
+
+      // Review notes
+      if (scan.reviewNotes) {
+        drawRule();
+        doc.fontSize(12).font("Helvetica-Bold").text("Review Notes");
+        doc.fontSize(10).font("Helvetica").text(scan.reviewNotes);
+        doc.moveDown();
+      }
+
+      // Disclaimer
+      drawRule();
+      doc.fontSize(8).font("Helvetica-Oblique").text(disclaimer, { align: "center" });
+
+      doc.end();
+
+      const pdfBuffer = await pdfReady;
 
       // Only mark as exported if previously approved
       if (scan.reviewStatus === "approved") {
         await storage.updateScan(id, { reviewStatus: "exported" });
       }
 
-      res.setHeader("Content-Type", "application/json");
-      res.json(pdfData);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="lexa-report-${id}.pdf"`);
+      res.send(pdfBuffer);
     } catch (error) {
       console.error("Error exporting PDF:", error);
       res.status(500).json({ error: "Failed to export PDF" });

@@ -383,7 +383,7 @@ export async function exportPdf(scanId: number) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Export not available");
   }
-  return res.json();
+  return res.blob();
 }
 
 export async function exportCsv(scanId: number, includeRejected = false) {
