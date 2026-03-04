@@ -59,7 +59,7 @@ export default function ExportButtons({ scanId, isApproved }: ExportButtonsProps
           disabled={!isApproved || exportingPdf}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
             isApproved
-              ? "bg-primary text-black hover:bg-primary/90 shadow-lg shadow-primary/20"
+              ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
               : "bg-secondary border border-border text-muted-foreground cursor-not-allowed"
           }`}
         >
@@ -78,7 +78,7 @@ export default function ExportButtons({ scanId, isApproved }: ExportButtonsProps
           disabled={!isApproved || exportingCsv}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
             isApproved
-              ? "bg-primary text-black hover:bg-primary/90 shadow-lg shadow-primary/20"
+              ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
               : "bg-secondary border border-border text-muted-foreground cursor-not-allowed"
           }`}
         >

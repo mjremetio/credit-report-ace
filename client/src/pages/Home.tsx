@@ -42,12 +42,12 @@ export default function Home() {
 
   return (
     <div className="h-full">
-      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6 justify-between">
-        <h2 className="font-display font-medium text-lg text-white">Manual Workflow</h2>
+      <header className="h-16 border-b border-border bg-white flex items-center px-6 justify-between">
+        <h2 className="font-display font-medium text-lg text-foreground">Dispute Scanner</h2>
         <button
           data-testid="button-new-scan"
           onClick={() => setShowNewScan(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black font-medium hover:bg-primary/90 transition-colors text-sm"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors text-sm"
         >
           <Plus className="w-4 h-4" />
           New Scan
@@ -63,7 +63,7 @@ export default function Home() {
               exit={{ opacity: 0, y: -10 }}
               className="mb-8 bg-card border border-primary/30 rounded-xl p-6"
             >
-              <h3 className="font-display text-lg text-white mb-4">Start New Dispute Scan</h3>
+              <h3 className="font-display text-lg text-foreground mb-4">Start New Dispute Scan</h3>
               <div className="flex gap-3">
                 <input
                   data-testid="input-consumer-name"
@@ -72,14 +72,14 @@ export default function Home() {
                   onChange={(e) => setConsumerName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                   placeholder="Enter your full name..."
-                  className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground font-mono text-sm focus:outline-none focus:border-primary"
+                  className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                   autoFocus
                 />
                 <button
                   data-testid="button-create-scan"
                   onClick={handleCreate}
                   disabled={!consumerName.trim() || createMutation.isPending}
-                  className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
                   {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
                   Begin Scan
@@ -87,7 +87,7 @@ export default function Home() {
                 <button
                   data-testid="button-cancel-scan"
                   onClick={() => { setShowNewScan(false); setConsumerName(""); }}
-                  className="px-4 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors"
+                  className="px-4 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors"
                 >
                   Cancel
                 </button>
@@ -111,14 +111,14 @@ export default function Home() {
             <div className="p-6 rounded-full bg-secondary inline-block mb-6">
               <Shield className="w-12 h-12 text-primary" />
             </div>
-            <h2 className="font-display text-2xl text-white mb-3">No Active Scans</h2>
-            <p className="text-muted-foreground font-mono text-sm max-w-md mx-auto mb-8">
-              Start a new scan to manually enter and analyze negative credit accounts for potential FCRA violations.
+            <h2 className="font-display text-2xl text-foreground mb-3">No Active Scans</h2>
+            <p className="text-muted-foreground text-sm max-w-md mx-auto mb-8">
+              Create a scan to enter and analyze negative credit accounts for potential FCRA violations.
             </p>
             <button
               data-testid="button-empty-new-scan"
               onClick={() => setShowNewScan(true)}
-              className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+              className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
               Start Your First Scan
@@ -129,7 +129,7 @@ export default function Home() {
         {scans.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="font-display text-lg text-white">Your Scans</h2>
+              <h2 className="font-display text-lg text-foreground">Your Scans</h2>
               <span className="text-xs font-mono text-muted-foreground">{scans.length} total</span>
             </div>
             {scans.map((scan: any) => (
@@ -147,7 +147,7 @@ export default function Home() {
                       <User className="w-5 h-5 text-primary" />
                     </div>
                     <div>
-                      <h3 className="font-display text-lg text-white group-hover:text-primary transition-colors">
+                      <h3 className="font-display text-lg text-foreground group-hover:text-primary transition-colors">
                         {scan.consumerName}
                       </h3>
                       <div className="flex items-center gap-4 mt-1">
@@ -171,13 +171,13 @@ export default function Home() {
                     {scan.status === "completed" && scan.reviewStatus !== "approved" && scan.reviewStatus !== "exported" && (
                       <button
                         onClick={(e) => { e.stopPropagation(); navigate(`/review/${scan.id}`); }}
-                        className="px-3 py-1.5 bg-primary text-black font-medium rounded-lg text-xs inline-flex items-center gap-1 hover:bg-primary/90 transition-colors"
+                        className="px-3 py-1.5 bg-primary text-primary-foreground font-medium rounded-lg text-xs inline-flex items-center gap-1 hover:bg-primary/90 transition-colors"
                       >
                         <Eye className="w-3 h-3" /> Review
                       </button>
                     )}
                     {(scan.reviewStatus === "approved" || scan.reviewStatus === "exported") && (
-                      <span className="text-xs font-mono text-green-400 flex items-center gap-1">
+                      <span className="text-xs font-mono text-green-600 flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" /> Approved
                       </span>
                     )}
@@ -185,7 +185,7 @@ export default function Home() {
                       {stepLabels.map((label, i) => (
                         <div key={i} className="flex items-center">
                           <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-mono ${
-                            i + 1 <= scan.currentStep ? "bg-primary text-black" : "bg-secondary text-muted-foreground border border-border"
+                            i + 1 <= scan.currentStep ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground border border-border"
                           }`}>
                             {i + 1}
                           </div>
@@ -217,20 +217,20 @@ export default function Home() {
 function ScanStatusBadge({ status, reviewStatus }: { status: string; reviewStatus?: string }) {
   if (reviewStatus === "approved" || reviewStatus === "exported") {
     return (
-      <span className="text-xs font-mono px-2 py-0.5 rounded border border-green-500/30 text-green-400 bg-green-500/10">
+      <span className="text-xs font-mono px-2 py-0.5 rounded border border-green-500/30 text-green-600 bg-green-500/10">
         approved
       </span>
     );
   }
   if (reviewStatus === "in_progress") {
     return (
-      <span className="text-xs font-mono px-2 py-0.5 rounded border border-purple-500/30 text-purple-400 bg-purple-500/10">
+      <span className="text-xs font-mono px-2 py-0.5 rounded border border-purple-500/30 text-purple-600 bg-purple-500/10">
         under review
       </span>
     );
   }
   const colors: Record<string, string> = {
-    completed: "border-green-500/30 text-green-400 bg-green-500/10",
+    completed: "border-green-500/30 text-green-600 bg-green-500/10",
     in_progress: "border-primary/30 text-primary bg-primary/10",
   };
   return (

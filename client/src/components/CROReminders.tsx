@@ -31,12 +31,12 @@ export default function CROReminders({ accountCreditor, customReminders }: CRORe
   return (
     <div className="bg-card border border-border rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-mono text-white flex items-center gap-2">
+        <h3 className="text-sm font-mono text-foreground flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-primary" />
           CRO Reminders — {accountCreditor}
         </h3>
         {allChecked && (
-          <span className="text-[10px] font-mono text-green-400 flex items-center gap-1">
+          <span className="text-[10px] font-mono text-green-600 flex items-center gap-1">
             <CheckCircle2 className="w-3 h-3" /> All complete
           </span>
         )}
@@ -58,7 +58,7 @@ export default function CROReminders({ accountCreditor, customReminders }: CRORe
               onChange={() => toggle(i)}
               className="mt-0.5 accent-primary"
             />
-            <span className={`text-xs font-mono ${checked.has(i) ? "text-green-400 line-through" : "text-muted-foreground"}`}>
+            <span className={`text-xs font-mono ${checked.has(i) ? "text-green-600 line-through" : "text-muted-foreground"}`}>
               {reminder}
             </span>
           </label>

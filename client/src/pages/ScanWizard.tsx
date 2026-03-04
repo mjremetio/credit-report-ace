@@ -69,7 +69,7 @@ export default function ScanWizard() {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
-          <h2 className="font-display text-xl text-white mb-2">Scan Not Found</h2>
+          <h2 className="font-display text-xl text-foreground mb-2">Scan Not Found</h2>
           <button onClick={() => navigate("/")} className="text-primary font-mono text-sm hover:underline">Go Home</button>
         </div>
       </div>
@@ -78,15 +78,15 @@ export default function ScanWizard() {
 
   return (
     <div className="h-full">
-      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center px-6 justify-between">
+      <header className="h-16 border-b border-border bg-white flex items-center px-6 justify-between">
         <div className="flex items-center gap-4">
-          <button data-testid="button-back-home" onClick={() => navigate("/")} className="text-muted-foreground hover:text-white transition-colors">
+          <button data-testid="button-back-home" onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="font-display font-medium text-lg text-white">{scan.consumerName}</h2>
+          <h2 className="font-display font-medium text-lg text-foreground">{scan.consumerName}</h2>
           {scan.clientState && (
             <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
-              scan.clientState === "CA" ? "border-yellow-500/30 text-yellow-400 bg-yellow-500/10" : "border-border text-muted-foreground bg-secondary"
+              scan.clientState === "CA" ? "border-yellow-500/30 text-yellow-600 bg-yellow-500/10" : "border-border text-muted-foreground bg-secondary"
             }`}>
               <MapPin className="w-3 h-3 inline mr-1" />{scan.clientState}
             </span>
@@ -100,7 +100,7 @@ export default function ScanWizard() {
                 onClick={() => goToStep(s.num)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all ${
                   step === s.num
-                    ? "bg-primary text-black"
+                    ? "bg-primary text-primary-foreground"
                     : s.num < step
                     ? "bg-primary/20 text-primary"
                     : "bg-secondary text-muted-foreground"
@@ -157,7 +157,7 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
         <div className="p-4 rounded-full bg-primary/10 inline-block mb-4">
           <Shield className="w-10 h-10 text-primary" />
         </div>
-        <h2 className="font-display text-3xl text-white mb-3">Welcome, {scan.consumerName}</h2>
+        <h2 className="font-display text-3xl text-foreground mb-3">Welcome, {scan.consumerName}</h2>
         <p className="text-muted-foreground font-mono text-sm max-w-lg mx-auto">
           This guided workflow will help you organize your negative credit accounts and identify potential FCRA violations.
         </p>
@@ -165,7 +165,7 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
 
       {/* Client info fields */}
       <div className="bg-card border border-primary/20 rounded-xl p-6 mb-8">
-        <h3 className="font-display text-white mb-4">Client Information</h3>
+        <h3 className="font-display text-foreground mb-4">Client Information</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-mono text-muted-foreground mb-1 block">Client Name</label>
@@ -174,17 +174,17 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
               placeholder="Full client name..."
-              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
+              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
             />
           </div>
           <div>
             <label className="text-xs font-mono text-muted-foreground mb-1 block">
-              Client State {clientState === "CA" && <span className="text-yellow-400">(CA-specific rules apply)</span>}
+              Client State {clientState === "CA" && <span className="text-yellow-600">(CA-specific rules apply)</span>}
             </label>
             <select
               value={clientState}
               onChange={(e) => setClientState(e.target.value)}
-              className={`w-full bg-background border rounded-lg px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-primary appearance-none ${
+              className={`w-full bg-background border rounded-lg px-4 py-3 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none ${
                 clientState === "CA" ? "border-yellow-500/50" : "border-border"
               }`}
             >
@@ -205,11 +205,11 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
           { step: 4, title: "Convert to Structured JSON & AI Analysis", desc: "Convert entries into structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), run AI violation analysis, then proceed to paralegal review and export." },
         ].map((item) => (
           <div key={item.step} className={`flex items-start gap-4 p-4 rounded-lg border ${item.step === 1 ? "border-primary/30 bg-primary/5" : "border-border bg-card"}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-mono flex-shrink-0 ${item.step === 1 ? "bg-primary text-black" : "bg-secondary text-muted-foreground"}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-mono flex-shrink-0 ${item.step === 1 ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}>
               {item.step}
             </div>
             <div>
-              <h4 className="font-display text-white">{item.title}</h4>
+              <h4 className="font-display text-foreground">{item.title}</h4>
               <p className="text-sm text-muted-foreground font-mono">{item.desc}</p>
             </div>
           </div>
@@ -220,7 +220,7 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
         <button
           data-testid="button-start-step2"
           onClick={handleProceed}
-          className="px-8 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2 text-lg"
+          className="px-8 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2 text-lg"
         >
           Begin <ArrowRight className="w-5 h-5" />
         </button>
@@ -264,7 +264,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
       <div className="mb-8">
-        <h2 className="font-display text-2xl text-white mb-2">Add Negative Accounts</h2>
+        <h2 className="font-display text-2xl text-foreground mb-2">Add Negative Accounts</h2>
         <p className="text-muted-foreground font-mono text-sm">
           Paste or enter the negative items from your credit report. Include as much detail as possible for better analysis.
         </p>
@@ -280,7 +280,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
               value={creditor}
               onChange={(e) => setCreditor(e.target.value)}
               placeholder="e.g., Portfolio Recovery Associates"
-              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
+              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
             />
           </div>
           <div>
@@ -289,7 +289,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
               data-testid="select-account-type"
               value={accountType}
               onChange={(e) => setAccountType(e.target.value)}
-              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+              className="w-full bg-background border border-border rounded-lg px-4 py-3 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
             >
               {ACCOUNT_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
@@ -307,14 +307,14 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
             onChange={(e) => setRawDetails(e.target.value)}
             placeholder="Paste the full text for this account from your credit report here... Include balance, dates, account numbers, status, and any other details."
             rows={5}
-            className="w-full bg-background border border-border rounded-lg px-4 py-3 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary resize-none"
+            className="w-full bg-background border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary resize-none"
           />
         </div>
         <button
           data-testid="button-add-account"
           onClick={handleAdd}
           disabled={!creditor.trim() || addMutation.isPending}
-          className="px-6 py-2.5 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+          className="px-6 py-2.5 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
         >
           {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           Add Account
@@ -335,7 +335,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
                   <FileText className="w-4 h-4 text-primary" />
                 </div>
                 <div>
-                  <div className="text-white font-medium">{acct.creditor}</div>
+                  <div className="text-foreground font-medium">{acct.creditor}</div>
                   <div className="text-xs font-mono text-muted-foreground">
                     {formatAccountType(acct.accountType)}
                     {acct.rawDetails && " — Details provided"}
@@ -358,7 +358,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
         <button
           data-testid="button-back-step1"
           onClick={() => goToStep(1)}
-          className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors inline-flex items-center gap-2"
+          className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors inline-flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -366,7 +366,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
           data-testid="button-next-step3"
           onClick={() => goToStep(3)}
           disabled={negAccounts.length === 0}
-          className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+          className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
         >
           Classify Accounts <ArrowRight className="w-4 h-4" />
         </button>
@@ -392,7 +392,7 @@ function Step3Classify({ scan, scanId, goToStep }: { scan: any; scanId: number; 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
       <div className="mb-8">
-        <h2 className="font-display text-2xl text-white mb-2">Classify Your Accounts</h2>
+        <h2 className="font-display text-2xl text-foreground mb-2">Classify Your Accounts</h2>
         <p className="text-muted-foreground font-mono text-sm">
           Fill in the details for each account. This information helps personalize the dispute workflow.
         </p>
@@ -413,14 +413,14 @@ function Step3Classify({ scan, scanId, goToStep }: { scan: any; scanId: number; 
         <button
           data-testid="button-back-step2"
           onClick={() => goToStep(2)}
-          className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors inline-flex items-center gap-2"
+          className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors inline-flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <button
           data-testid="button-next-step4"
           onClick={() => goToStep(4)}
-          className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+          className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
         >
           View Next Steps <ArrowRight className="w-4 h-4" />
         </button>
@@ -463,10 +463,10 @@ function AccountClassifyCard({ account, index, onUpdate }: { account: any; index
     <div data-testid={`classify-card-${account.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
       <div className="px-6 py-4 border-b border-border bg-secondary/30 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-black text-xs font-mono font-bold">
+          <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-mono font-bold">
             {index + 1}
           </div>
-          <h3 className="font-display text-lg text-white">{account.creditor}</h3>
+          <h3 className="font-display text-lg text-foreground">{account.creditor}</h3>
         </div>
         <WorkflowBadge step={account.workflowStep} />
       </div>
@@ -605,17 +605,17 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-      {/* Manual Workflow Progress */}
+      {/* Dispute Scanner Progress */}
       <div className="mb-6 bg-card border border-border rounded-xl p-5">
-        <h4 className="font-display text-white text-sm mb-3">Manual Workflow</h4>
+        <h4 className="font-display text-foreground text-sm mb-3">Dispute Scanner</h4>
         <div className="space-y-2 text-xs font-mono">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
             <span className="text-muted-foreground">Manual data entry — {negAccounts.length} account(s) added</span>
           </div>
           <div className="flex items-center gap-2">
             {(allScanned || pipelineResult) ? (
-              <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
             ) : pipelineRunning ? (
               <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
             ) : (
@@ -640,20 +640,20 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
       {pipelineResult && (
         <div className="mb-6 bg-green-500/5 border border-green-500/30 rounded-xl p-5">
           <div className="flex items-center gap-3 mb-3">
-            <CheckCircle2 className="w-5 h-5 text-green-400" />
-            <h4 className="font-display text-white text-sm">Full Analysis Pipeline Complete</h4>
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <h4 className="font-display text-foreground text-sm">Full Analysis Pipeline Complete</h4>
           </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
-              <div className="text-2xl font-display text-white">{pipelineResult.accountsCreated}</div>
+              <div className="text-2xl font-display text-foreground">{pipelineResult.accountsCreated}</div>
               <div className="text-[10px] font-mono text-muted-foreground">Tradelines</div>
             </div>
             <div>
-              <div className="text-2xl font-display text-white">{pipelineResult.violationsFound}</div>
+              <div className="text-2xl font-display text-foreground">{pipelineResult.violationsFound}</div>
               <div className="text-[10px] font-mono text-muted-foreground">Violations</div>
             </div>
             <div>
-              <div className="text-2xl font-display text-white">{pipelineResult.issueFlagsDetected}</div>
+              <div className="text-2xl font-display text-foreground">{pipelineResult.issueFlagsDetected}</div>
               <div className="text-[10px] font-mono text-muted-foreground">Issue Flags</div>
             </div>
           </div>
@@ -662,7 +662,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <h2 className="font-display text-2xl text-white mb-2">Analyze & Review</h2>
+          <h2 className="font-display text-2xl text-foreground mb-2">Analyze & Review</h2>
           <p className="text-muted-foreground font-mono text-sm">
             Convert manual entries to structured JSON and run AI violation analysis, or scan individual accounts.
           </p>
@@ -673,7 +673,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               data-testid="button-run-pipeline"
               onClick={handleRunPipeline}
               disabled={pipelineRunning || negAccounts.length === 0}
-              className="px-5 py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+              className="px-5 py-2.5 bg-green-600 text-foreground font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
             >
               {pipelineRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
               {pipelineRunning ? "Running Pipeline..." : "Run Full Analysis"}
@@ -684,7 +684,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               data-testid="button-scan-all"
               onClick={handleScanAll}
               disabled={scanAllRunning}
-              className="px-5 py-2.5 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+              className="px-5 py-2.5 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
             >
               {scanAllRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
               {scanAllRunning ? "Scanning..." : `Scan Individual (${unscannedCount})`}
@@ -697,7 +697,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
       {pipelineRunning && (
         <div className="mb-6 bg-primary/5 border border-primary/30 rounded-xl p-6 text-center">
           <Activity className="w-8 h-8 text-primary animate-pulse mx-auto mb-3" />
-          <h4 className="font-display text-white mb-2">Running Full Analysis Pipeline...</h4>
+          <h4 className="font-display text-foreground mb-2">Running Full Analysis Pipeline...</h4>
           <p className="text-xs font-mono text-muted-foreground">
             Converting {negAccounts.length} account(s) to structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), computing issue flags, and running AI violation analysis...
           </p>
@@ -715,16 +715,16 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         <div className="mb-6 bg-primary/5 border border-primary/20 rounded-lg p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-primary" />
-            <span className="text-sm font-mono text-white">
+            <span className="text-sm font-mono text-foreground">
               {totalViolationCount} violation{totalViolationCount !== 1 ? "s" : ""} detected across {negAccounts.filter((a: any) => a.violations?.length > 0).length} account{negAccounts.filter((a: any) => a.violations?.length > 0).length !== 1 ? "s" : ""}
             </span>
           </div>
           <div className="flex items-center gap-4 text-xs font-mono">
             {fcraViolations.length > 0 && (
-              <span className="text-blue-400">FCRA: {fcraViolations.length}</span>
+              <span className="text-blue-600">FCRA: {fcraViolations.length}</span>
             )}
             {debtCollectorViolations.length > 0 && (
-              <span className="text-purple-400">FDCPA: {debtCollectorViolations.length}</span>
+              <span className="text-purple-600">FDCPA: {debtCollectorViolations.length}</span>
             )}
             <span className="text-muted-foreground">
               {unscannedCount === 0 ? "All accounts scanned" : `${unscannedCount} remaining`}
@@ -747,10 +747,10 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
               <div className="px-6 py-4 border-b border-border bg-secondary/30 flex items-center justify-between">
                 <div>
-                  <h3 className="font-display text-lg text-white">{acct.creditor}</h3>
+                  <h3 className="font-display text-lg text-foreground">{acct.creditor}</h3>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-xs font-mono text-muted-foreground">{formatAccountType(acct.accountType)}</span>
-                    {acct.balance && <span className="text-xs font-mono text-white">${Number(acct.balance).toLocaleString()}</span>}
+                    {acct.balance && <span className="text-xs font-mono text-foreground">${Number(acct.balance).toLocaleString()}</span>}
                     <WorkflowBadge step={acct.workflowStep} />
                   </div>
                 </div>
@@ -760,7 +760,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                       data-testid={`button-scan-${acct.id}`}
                       onClick={() => handleScan(acct.id)}
                       disabled={isScanning || scanAllRunning}
-                      className="px-4 py-2 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+                      className="px-4 py-2 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
                     >
                       {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                       {isScanning ? "Scanning..." : "Scan"}
@@ -771,7 +771,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                       data-testid={`button-rescan-${acct.id}`}
                       onClick={() => handleScan(acct.id)}
                       disabled={isScanning || scanAllRunning}
-                      className="px-3 py-1.5 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-white hover:border-primary/30 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-xs"
+                      className="px-3 py-1.5 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-xs"
                     >
                       {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
                       Re-scan
@@ -793,7 +793,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                     {/* FCRA Violations */}
                     {acctFcra.length > 0 && (
                       <div>
-                        <h4 className="text-xs font-mono text-blue-400 mb-3 flex items-center gap-1">
+                        <h4 className="text-xs font-mono text-blue-600 mb-3 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" /> FCRA REPORTING VIOLATIONS ({acctFcra.length})
                         </h4>
                         <div className="space-y-2">
@@ -807,7 +807,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                     {/* FDCPA Violations */}
                     {acctFdcpa.length > 0 && (
                       <div>
-                        <h4 className="text-xs font-mono text-purple-400 mb-3 flex items-center gap-1">
+                        <h4 className="text-xs font-mono text-purple-600 mb-3 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" /> DEBT COLLECTOR CONDUCT VIOLATIONS ({acctFdcpa.length})
                         </h4>
                         <div className="space-y-2">
@@ -822,8 +822,8 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
                 {!isScanning && isScanned && !hasViolations && (
                   <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-center">
-                    <CheckCircle2 className="w-5 h-5 text-green-400 mx-auto mb-2" />
-                    <p className="text-sm text-green-400 font-mono">No violations detected for this account.</p>
+                    <CheckCircle2 className="w-5 h-5 text-green-600 mx-auto mb-2" />
+                    <p className="text-sm text-green-600 font-mono">No violations detected for this account.</p>
                   </div>
                 )}
 
@@ -842,7 +842,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         <button
           data-testid="button-back-step3"
           onClick={() => goToStep(3)}
-          className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors inline-flex items-center gap-2"
+          className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors inline-flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
@@ -851,7 +851,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             <button
               data-testid="button-begin-review"
               onClick={() => navigate(`/review/${scanId}`)}
-              className="px-6 py-3 bg-primary text-black font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+              className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
             >
               <ClipboardCheck className="w-4 h-4" /> Paralegal Review
             </button>
@@ -859,14 +859,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <button
             data-testid="button-complete-scan"
             onClick={completeScan}
-            className="px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
+            className="px-6 py-3 bg-green-600 text-foreground font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
           >
             <CheckCircle2 className="w-4 h-4" /> Mark Complete
           </button>
           <button
             data-testid="button-view-profile"
             onClick={() => navigate("/profile")}
-            className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-white transition-colors inline-flex items-center gap-2"
+            className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors inline-flex items-center gap-2"
           >
             <Eye className="w-4 h-4" /> View Profile
           </button>
@@ -878,16 +878,16 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
 function ViolationCard({ violation }: { violation: any }) {
   const confidenceColors: Record<string, string> = {
-    confirmed: "border-green-500/30 text-green-400 bg-green-500/10",
-    likely: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10",
-    possible: "border-orange-500/30 text-orange-400 bg-orange-500/10",
+    confirmed: "border-green-500/30 text-green-600 bg-green-500/10",
+    likely: "border-yellow-500/30 text-yellow-600 bg-yellow-500/10",
+    possible: "border-orange-500/30 text-orange-600 bg-orange-500/10",
   };
 
   return (
     <div data-testid={`violation-${violation.id}`} className="bg-background border border-border rounded-lg p-4">
       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
         <SeverityBadge severity={violation.severity} />
-        <span className="text-sm text-white font-medium">{violation.violationType}</span>
+        <span className="text-sm text-foreground font-medium">{violation.violationType}</span>
         {violation.confidence && (
           <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
             {violation.confidence}
@@ -899,7 +899,7 @@ function ViolationCard({ violation }: { violation: any }) {
         <p className="text-xs font-mono text-muted-foreground/70 mt-1.5 italic">Evidence: {violation.evidence}</p>
       )}
       {violation.evidenceRequired && (
-        <p className="text-xs font-mono text-yellow-400/70 mt-1">Evidence needed: {violation.evidenceRequired}</p>
+        <p className="text-xs font-mono text-yellow-600/70 mt-1">Evidence needed: {violation.evidenceRequired}</p>
       )}
       <div className="mt-2 flex items-center gap-2 flex-wrap">
         <span className="text-xs font-mono text-primary">{violation.fcraStatute}</span>
@@ -908,7 +908,7 @@ function ViolationCard({ violation }: { violation: any }) {
         )}
       </div>
       {violation.croReminder && (
-        <p className="text-xs font-mono text-yellow-400/60 mt-2 italic">CRO: {violation.croReminder}</p>
+        <p className="text-xs font-mono text-yellow-600/60 mt-2 italic">CRO: {violation.croReminder}</p>
       )}
     </div>
   );
@@ -927,7 +927,7 @@ function Field({ label, testId, value, onChange, onBlur, placeholder }: {
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={placeholder}
-        className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-white placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
+        className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus:outline-none focus:border-primary"
       />
     </div>
   );
@@ -935,9 +935,9 @@ function Field({ label, testId, value, onChange, onBlur, placeholder }: {
 
 function WorkflowBadge({ step }: { step: string }) {
   const colors: Record<string, string> = {
-    pending: "border-yellow-500/30 text-yellow-400 bg-yellow-500/10",
-    classified: "border-blue-500/30 text-blue-400 bg-blue-500/10",
-    scanned: "border-purple-500/30 text-purple-400 bg-purple-500/10",
+    pending: "border-yellow-500/30 text-yellow-600 bg-yellow-500/10",
+    classified: "border-blue-500/30 text-blue-600 bg-blue-500/10",
+    scanned: "border-purple-500/30 text-purple-600 bg-purple-500/10",
   };
   return (
     <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colors[step] || colors.pending}`}>
