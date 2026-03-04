@@ -15,13 +15,11 @@ export default function ExportButtons({ scanId }: ExportButtonsProps) {
     setError(null);
     setExportingPdf(true);
     try {
-      const data = await exportPdf(scanId);
-      // Download as JSON (would be actual PDF in production)
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const blob = await exportPdf(scanId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `lexa-report-${scanId}.json`;
+      a.download = `lexa-report-${scanId}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: any) {
