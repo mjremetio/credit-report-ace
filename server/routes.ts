@@ -55,6 +55,17 @@ const reviewViolationSchema = z.object({
   severityOverride: z.string().optional().nullable(),
   descriptionOverride: z.string().optional().nullable(),
   reviewedBy: z.string().optional().nullable(),
+  // Paralegal editable fields
+  explanation: z.string().optional().nullable(),
+  evidence: z.string().optional().nullable(),
+  fcraStatute: z.string().optional().nullable(),
+  evidenceRequired: z.string().optional().nullable(),
+  evidenceProvided: z.boolean().optional().nullable(),
+  evidenceNotes: z.string().optional().nullable(),
+  confidence: z.string().optional().nullable(),
+  croReminder: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
+  paralegalNotes: z.string().optional().nullable(),
 });
 
 const approveScanSchema = z.object({
@@ -571,11 +582,55 @@ export async function registerRoutes(
         updates.descriptionOverride = null;
       }
 
+      // Paralegal editable fields — allowed for any review status
+      if (parsed.data.explanation !== undefined) updates.explanation = parsed.data.explanation;
+      if (parsed.data.evidence !== undefined) updates.evidence = parsed.data.evidence;
+      if (parsed.data.fcraStatute !== undefined) updates.fcraStatute = parsed.data.fcraStatute;
+      if (parsed.data.evidenceRequired !== undefined) updates.evidenceRequired = parsed.data.evidenceRequired;
+      if (parsed.data.evidenceProvided !== undefined) updates.evidenceProvided = parsed.data.evidenceProvided;
+      if (parsed.data.evidenceNotes !== undefined) updates.evidenceNotes = parsed.data.evidenceNotes;
+      if (parsed.data.confidence !== undefined) updates.confidence = parsed.data.confidence;
+      if (parsed.data.croReminder !== undefined) updates.croReminder = parsed.data.croReminder;
+      if (parsed.data.category !== undefined) updates.category = parsed.data.category;
+      if (parsed.data.paralegalNotes !== undefined) updates.paralegalNotes = parsed.data.paralegalNotes;
+
       const updated = await storage.updateViolation(id, updates);
       res.json(updated);
     } catch (error) {
       console.error("Error reviewing violation:", error);
       res.status(500).json({ error: "Failed to review violation" });
+    }
+  });
+
+  // PATCH /api/violations/:id/edit — Paralegal edit violation details (independent of review status)
+  app.patch("/api/violations/:id/edit", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const violation = await storage.getViolation(id);
+      if (!violation) return res.status(404).json({ error: "Violation not found" });
+
+      const allowedFields = [
+        "explanation", "evidence", "fcraStatute", "evidenceRequired",
+        "evidenceProvided", "evidenceNotes", "confidence", "croReminder",
+        "category", "paralegalNotes", "severity", "violationType",
+      ];
+
+      const updates: Record<string, any> = {};
+      for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      const updated = await storage.updateViolation(id, updates);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error editing violation:", error);
+      res.status(500).json({ error: "Failed to edit violation" });
     }
   });
 
@@ -589,15 +644,8 @@ export async function registerRoutes(
       const scan = await storage.getScan(id);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
 
-      // Check all violations are reviewed (none pending)
+      // Count violations by status — allow approval even with pending violations
       const allViolations = await storage.getViolationsByScan(id);
-      const pendingCount = allViolations.filter(v => !v.reviewStatus || v.reviewStatus === "pending").length;
-      if (pendingCount > 0) {
-        return res.status(400).json({
-          error: `Cannot approve: ${pendingCount} violation(s) still pending review`,
-          pendingCount,
-        });
-      }
 
       const confirmed = allViolations.filter(v => v.reviewStatus === "confirmed").length;
       const modified = allViolations.filter(v => v.reviewStatus === "modified").length;
@@ -705,8 +753,14 @@ export async function registerRoutes(
         },
         accounts: accountsWithViolations.map(a => ({
           creditor: a.creditor,
+          accountNumber: a.accountNumber,
           accountType: a.accountType,
+          originalCreditor: a.originalCreditor,
           balance: a.balance,
+          status: a.status,
+          dateOpened: a.dateOpened,
+          dateOfDelinquency: a.dateOfDelinquency,
+          bureaus: a.bureaus,
           violations: a.violations
             .filter(v => v.reviewStatus !== "rejected")
             .map(v => ({
@@ -714,11 +768,16 @@ export async function registerRoutes(
               severity: v.severityOverride || v.severity,
               description: v.descriptionOverride || v.explanation,
               fcraStatute: v.fcraStatute,
+              evidence: v.evidence,
               category: v.category,
               confidence: v.confidence,
+              evidenceRequired: v.evidenceRequired,
               evidenceStatus: v.evidenceProvided ? "Provided" : "Missing",
+              evidenceNotes: v.evidenceNotes,
+              croReminder: v.croReminder,
               reviewStatus: v.reviewStatus || "pending",
               reviewerNotes: v.reviewerNotes,
+              paralegalNotes: v.paralegalNotes,
             })),
         })),
         reviewNotes: scan.reviewNotes,
@@ -758,9 +817,12 @@ export async function registerRoutes(
 
       // CSV header
       const headers = [
-        "Account Name", "Creditor", "Account Type", "Violation Category",
-        "Violation Type", "Description", "Severity", "AI Confidence",
-        "Review Status", "Reviewer Notes", "Evidence Status",
+        "Account Name", "Creditor", "Account Number", "Account Type",
+        "Original Creditor", "Balance", "Status", "Bureaus",
+        "Violation Category", "Violation Type", "Description", "Severity",
+        "AI Confidence", "Evidence", "Evidence Required", "Evidence Status",
+        "Evidence Notes", "CRO Reminder", "FCRA/FDCPA Statute",
+        "Review Status", "Reviewer Notes", "Paralegal Notes",
         "Date Detected", "Date Reviewed"
       ];
 
@@ -771,15 +833,26 @@ export async function registerRoutes(
           const row = [
             acct.creditor,
             acct.originalCreditor || acct.creditor,
+            acct.accountNumber || "",
             formatAccountType(acct.accountType),
+            acct.originalCreditor || "",
+            acct.balance != null ? String(acct.balance) : "",
+            acct.status || "",
+            acct.bureaus || "",
             v.category || "FCRA_REPORTING",
             v.violationType,
             v.reviewStatus === "modified" && v.descriptionOverride ? v.descriptionOverride : v.explanation,
             v.reviewStatus === "modified" && v.severityOverride ? v.severityOverride : v.severity,
             v.confidence || "N/A",
+            v.evidence || "",
+            v.evidenceRequired || "",
+            v.evidenceProvided ? "Provided" : "Missing",
+            v.evidenceNotes || "",
+            v.croReminder || "",
+            v.fcraStatute || "",
             v.reviewStatus === "rejected" ? "REJECTED" : (v.reviewStatus || "pending"),
             v.reviewerNotes || "",
-            v.evidenceProvided ? "Provided" : "Missing",
+            v.paralegalNotes || "",
             v.createdAt ? new Date(v.createdAt).toLocaleDateString() : "",
             v.reviewedAt ? new Date(v.reviewedAt).toLocaleDateString() : "",
           ];
