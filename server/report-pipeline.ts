@@ -25,6 +25,7 @@ import type {
   OrganizedCreditReport,
   CreditorContact,
   Bureau,
+  BureauSummary,
   AccountType,
   AccountStatus,
 } from "@shared/credit-report-types";
@@ -274,6 +275,7 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
     name: report.profile.name,
     aliases: report.profile.aliases || [],
     dateOfBirth: report.profile.dateOfBirth || null,
+    dateOfBirthPerBureau: report.profile.dateOfBirthPerBureau || [],
     ssn: report.profile.ssn || null,
     reportDate: report.profile.reportDate,
     addresses: report.profile.addresses,
@@ -304,6 +306,13 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
   let totalCreditLimit: number | null = null;
   let totalMonthlyPayment: number | null = null;
 
+  // Ensure all 3 bureaus are represented in perBureau summaries
+  const ALL_BUREAU_NAMES: Bureau[] = ["TransUnion", "Experian", "Equifax"];
+  const perBureauMap = new Map<Bureau, BureauSummary>();
+  for (const bs of report.bureauSummaries) {
+    perBureauMap.set(bs.bureau, bs);
+  }
+
   if (report.bureauSummaries.length > 0) {
     // Use the max values across bureaus for totals
     for (const bs of report.bureauSummaries) {
@@ -322,7 +331,46 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
       }
     }
   } else {
-    // Compute from tradelines
+    // Compute per-bureau summaries from tradelines when no bureau summaries exist
+    for (const bureauName of ALL_BUREAU_NAMES) {
+      let bTotal = 0, bOpen = 0, bClosed = 0, bDerog = 0, bColl = 0;
+      let bBalance: number | undefined;
+      let bCreditLimit: number | undefined;
+      let bMonthly: number | undefined;
+
+      for (const tl of report.tradelines) {
+        const bd = tl.bureauDetails.find(d => d.bureau === bureauName);
+        if (!bd && !tl.bureaus.includes(bureauName)) continue;
+        bTotal++;
+        const status = bd?.status?.toLowerCase() || tl.aggregateStatus;
+        if (status === "current" || status.includes("open") || status === "late") bOpen++;
+        if (status === "closed" || status === "paid" || status === "settled") bClosed++;
+        if (status.includes("charge") || status === "derogatory" || status === "repossession") bDerog++;
+        if (tl.accountType === "collection" || tl.aggregateStatus === "collection") bColl++;
+
+        const balance = bd?.balance ?? tl.balance;
+        if (balance != null) bBalance = (bBalance || 0) + balance;
+        if (bd?.creditLimit != null) bCreditLimit = (bCreditLimit || 0) + bd.creditLimit;
+        if (bd?.monthlyPayment != null) bMonthly = (bMonthly || 0) + bd.monthlyPayment;
+      }
+
+      if (bTotal > 0) {
+        perBureauMap.set(bureauName, {
+          bureau: bureauName,
+          totalAccounts: bTotal,
+          openAccounts: bOpen,
+          closedAccounts: bClosed,
+          derogatoryCount: bDerog,
+          collectionsCount: bColl,
+          publicRecordsCount: report.publicRecords.filter(pr => pr.bureaus.includes(bureauName)).length,
+          inquiriesCount: report.inquiries.filter(inq => inq.bureau === bureauName).length,
+          balanceTotal: bBalance,
+          creditLimitTotal: bCreditLimit,
+          monthlyPaymentTotal: bMonthly,
+        });
+      }
+    }
+
     totalAccounts = report.tradelines.length;
     for (const tl of report.tradelines) {
       if (tl.aggregateStatus === "current" || tl.aggregateStatus === "late") openAccounts++;
@@ -331,6 +379,20 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
       if (tl.balance != null) totalBalance = (totalBalance || 0) + tl.balance;
     }
   }
+
+  // Build final perBureau array with all 3 bureaus represented
+  const perBureauFinal: BureauSummary[] = ALL_BUREAU_NAMES.map(bureau =>
+    perBureauMap.get(bureau) || {
+      bureau,
+      totalAccounts: 0,
+      openAccounts: 0,
+      closedAccounts: 0,
+      derogatoryCount: 0,
+      collectionsCount: 0,
+      publicRecordsCount: 0,
+      inquiriesCount: 0,
+    }
+  );
 
   // ── Creditor Contacts ──
   const contactMap = new Map<string, CreditorContact>();
@@ -394,7 +456,7 @@ export function organizeReport(report: ParsedCreditReport): OrganizedCreditRepor
       totalBalance,
       totalCreditLimit,
       totalMonthlyPayment,
-      perBureau: report.bureauSummaries,
+      perBureau: perBureauFinal,
     },
     accountHistory: accountHistory.map(stripHeavyFields),
     publicInformation: report.publicRecords.map(pr => ({ ...pr, evidenceText: "" })),

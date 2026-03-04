@@ -6,7 +6,7 @@ import {
   UploadCloud, Activity, Loader2, CheckCircle2, AlertTriangle, FileText,
   Edit3, ArrowRight, RotateCcw, Eye, Shield, ClipboardCheck, Download,
   Type, User, CreditCard, Building, MapPin, Briefcase, Hash,
-  ChevronDown, ChevronUp, Calendar
+  ChevronDown, ChevronUp, Calendar, Code
 } from "lucide-react";
 import {
   extractFileText, structureExtractedText, structureUploadFile,
@@ -608,9 +608,30 @@ export default function Upload() {
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <InfoField label="Full Name" value={organizedReport.personalInformation?.name} icon={<User className="w-3 h-3" />} />
-                      <InfoField label="Date of Birth" value={organizedReport.personalInformation?.dateOfBirth} icon={<Calendar className="w-3 h-3" />} />
                       <InfoField label="SSN" value={organizedReport.personalInformation?.ssn} icon={<Hash className="w-3 h-3" />} />
                       <InfoField label="Report Date" value={organizedReport.personalInformation?.reportDate} icon={<Calendar className="w-3 h-3" />} />
+                    </div>
+
+                    {/* Date of Birth - Tri-Bureau */}
+                    <div>
+                      <p className="text-xs font-mono text-muted-foreground mb-2 flex items-center gap-1">
+                        <Calendar className="w-3 h-3" /> Date of Birth
+                      </p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
+                          const perBureau = organizedReport.personalInformation?.dateOfBirthPerBureau;
+                          const entry = perBureau?.find((e: any) => e.bureau === bureau);
+                          const value = entry?.value || null;
+                          return (
+                            <div key={bureau} className="bg-background/30 border border-border rounded-lg p-2 text-center">
+                              <p className="text-[10px] font-mono text-muted-foreground mb-0.5">{bureau}</p>
+                              <p className={`text-xs font-mono ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
+                                {value || "--"}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {organizedReport.personalInformation?.addresses?.length > 0 && (
@@ -673,7 +694,7 @@ export default function Upload() {
                   </div>
                 </StructuredSection>
 
-                {/* Account Summary */}
+                {/* Account Summary - Tri-Bureau */}
                 <StructuredSection
                   title="Account Summary"
                   icon={<FileText className="w-4 h-4 text-primary" />}
@@ -681,33 +702,11 @@ export default function Upload() {
                   onToggle={() => toggleSection("accountSummary")}
                   testId="section-account-summary"
                 >
-                  <div className="grid grid-cols-3 gap-3">
-                    <SummaryCard label="Total Accounts" value={organizedReport.accountSummary?.totalAccounts} />
-                    <SummaryCard label="Open Accounts" value={organizedReport.accountSummary?.openAccounts} />
-                    <SummaryCard label="Closed Accounts" value={organizedReport.accountSummary?.closedAccounts} />
-                    <SummaryCard label="Derogatory" value={organizedReport.accountSummary?.derogatoryAccounts} highlight />
-                    <SummaryCard label="Collections" value={organizedReport.accountSummary?.collectionAccounts} highlight />
-                    <SummaryCard label="Public Records" value={organizedReport.accountSummary?.publicRecordCount} />
-                    <SummaryCard label="Total Balance" value={organizedReport.accountSummary?.totalBalance != null ? `$${organizedReport.accountSummary.totalBalance.toLocaleString()}` : "N/A"} />
-                    <SummaryCard label="Credit Limit" value={organizedReport.accountSummary?.totalCreditLimit != null ? `$${organizedReport.accountSummary.totalCreditLimit.toLocaleString()}` : "N/A"} />
-                    <SummaryCard label="Monthly Payment" value={organizedReport.accountSummary?.totalMonthlyPayment != null ? `$${organizedReport.accountSummary.totalMonthlyPayment.toLocaleString()}` : "N/A"} />
-                  </div>
-
-                  {organizedReport.accountSummary?.perBureau?.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-xs font-mono text-muted-foreground mb-2">Per-Bureau Breakdown</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {organizedReport.accountSummary.perBureau.map((bs: any, i: number) => (
-                          <div key={i} className="bg-background/30 border border-border rounded p-2 text-[11px] font-mono">
-                            <p className="text-primary font-medium mb-1">{bs.bureau}</p>
-                            <p className="text-muted-foreground">Accounts: <span className="text-foreground">{bs.totalAccounts}</span></p>
-                            <p className="text-muted-foreground">Derogatory: <span className="text-destructive">{bs.derogatoryCount}</span></p>
-                            <p className="text-muted-foreground">Collections: <span className="text-yellow-600">{bs.collectionsCount}</span></p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <TriBureauSummaryTable
+                    perBureau={organizedReport.accountSummary?.perBureau || []}
+                    collectionAccounts={organizedReport.accountSummary?.collectionAccounts}
+                    publicRecordCount={organizedReport.accountSummary?.publicRecordCount}
+                  />
                 </StructuredSection>
 
                 {/* Account History / Tradelines */}
@@ -834,6 +833,11 @@ export default function Upload() {
                   Structured report data not available.
                 </p>
               </div>
+            )}
+
+            {/* Raw JSON Viewer */}
+            {organizedReport && (
+              <JsonViewer data={organizedReport} />
             )}
 
             {/* Action Buttons */}
@@ -1107,7 +1111,100 @@ function SummaryCard({
   );
 }
 
+function TriBureauSummaryTable({
+  perBureau,
+  collectionAccounts,
+  publicRecordCount,
+}: {
+  perBureau: any[];
+  collectionAccounts?: number;
+  publicRecordCount?: number;
+}) {
+  const bureauNames = ["TransUnion", "Experian", "Equifax"] as const;
+
+  // Smart-detect which bureaus have data
+  const getBureauData = (bureau: string) =>
+    perBureau.find((bs: any) => bs.bureau === bureau) || null;
+
+  const rows: Array<{ label: string; key: string; format?: "currency"; highlight?: boolean }> = [
+    { label: "Total Accounts", key: "totalAccounts" },
+    { label: "Open Accounts", key: "openAccounts" },
+    { label: "Closed Accounts", key: "closedAccounts" },
+    { label: "Derogatory", key: "derogatoryCount", highlight: true },
+    { label: "Collections", key: "collectionsCount", highlight: true },
+    { label: "Public Records", key: "publicRecordsCount" },
+    { label: "Inquiries (2yr)", key: "inquiriesCount" },
+    { label: "Total Balance", key: "balanceTotal", format: "currency" },
+    { label: "Credit Limit", key: "creditLimitTotal", format: "currency" },
+    { label: "Monthly Payment", key: "monthlyPaymentTotal", format: "currency" },
+  ];
+
+  const formatValue = (val: any, format?: string) => {
+    if (val == null || val === undefined) return "--";
+    if (format === "currency") return `$${Number(val).toLocaleString()}`;
+    return String(val);
+  };
+
+  if (perBureau.length === 0) {
+    return (
+      <div className="text-center py-4">
+        <p className="text-xs font-mono text-muted-foreground">No per-bureau summary data available.</p>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          {collectionAccounts != null && <SummaryCard label="Collections" value={collectionAccounts} highlight />}
+          {publicRecordCount != null && <SummaryCard label="Public Records" value={publicRecordCount} />}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs font-mono">
+        <thead>
+          <tr className="border-b border-border">
+            <th className="text-left py-2 px-2 text-muted-foreground font-normal w-1/4"></th>
+            {bureauNames.map(bureau => {
+              const hasData = !!getBureauData(bureau);
+              return (
+                <th key={bureau} className={`text-center py-2 px-2 font-medium ${hasData ? "text-primary" : "text-muted-foreground/50"}`}>
+                  {bureau}
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.key} className="border-b border-border/50">
+              <td className="py-1.5 px-2 text-muted-foreground">{row.label}</td>
+              {bureauNames.map(bureau => {
+                const data = getBureauData(bureau);
+                const val = data ? data[row.key] : null;
+                const formatted = formatValue(val, row.format);
+                const isBlank = formatted === "--";
+                return (
+                  <td
+                    key={bureau}
+                    className={`text-center py-1.5 px-2 ${
+                      isBlank ? "text-muted-foreground/40" :
+                      row.highlight && val > 0 ? "text-destructive font-medium" :
+                      "text-foreground"
+                    }`}
+                  >
+                    {formatted}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function TradelineRow({ tradeline }: { tradeline: any }) {
+  const [expanded, setExpanded] = useState(false);
   const statusColors: Record<string, string> = {
     current: "text-green-600 bg-green-500/10 border-green-500/30",
     closed: "text-muted-foreground bg-secondary border-border",
@@ -1120,21 +1217,202 @@ function TradelineRow({ tradeline }: { tradeline: any }) {
   };
 
   const statusClass = statusColors[tradeline.aggregateStatus] || "text-muted-foreground bg-secondary border-border";
+  const bureauDetails: any[] = tradeline.bureauDetails || [];
+  const allBureaus = ["TransUnion", "Experian", "Equifax"] as const;
+
+  // Smart-detect which bureaus report this account
+  const getBureauDetail = (bureau: string) =>
+    bureauDetails.find((bd: any) => bd.bureau === bureau) || null;
+
+  // Determine which bureaus are present
+  const reportedBureaus = allBureaus.filter(b =>
+    (tradeline.bureaus || []).includes(b) || getBureauDetail(b)
+  );
+
+  // Define the fields to show in the tri-bureau detail view
+  const detailFields: Array<{ label: string; key: string; format?: "currency" | "date" }> = [
+    { label: "Account #", key: "accountNumber" },
+    { label: "Status", key: "status" },
+    { label: "Balance", key: "balance", format: "currency" },
+    { label: "Credit Limit", key: "creditLimit", format: "currency" },
+    { label: "High Balance", key: "highBalance", format: "currency" },
+    { label: "Monthly Payment", key: "monthlyPayment", format: "currency" },
+    { label: "Past Due", key: "pastDueAmount", format: "currency" },
+    { label: "Date Opened", key: "dateOpened", format: "date" },
+    { label: "Date Closed", key: "dateClosed", format: "date" },
+    { label: "Last Payment", key: "lastPaymentDate", format: "date" },
+    { label: "Last Reported", key: "lastReportedDate", format: "date" },
+    { label: "Payment Status", key: "paymentStatus" },
+    { label: "Account Rating", key: "accountRating" },
+    { label: "Creditor Type", key: "creditorType" },
+    { label: "Terms", key: "terms" },
+  ];
+
+  const formatDetailValue = (val: any, format?: string) => {
+    if (val == null || val === undefined || val === "") return null;
+    if (format === "currency") return `$${Number(val).toLocaleString()}`;
+    return String(val);
+  };
+
+  // Filter to only show fields where at least one bureau has data
+  const activeFields = detailFields.filter(field =>
+    allBureaus.some(b => {
+      const detail = getBureauDetail(b);
+      return detail && formatDetailValue(detail[field.key], field.format) !== null;
+    })
+  );
 
   return (
-    <div className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-foreground font-medium">{tradeline.creditorName}</span>
-        <span className={`px-1.5 py-0.5 rounded text-[10px] border ${statusClass}`}>
-          {tradeline.aggregateStatus}
-        </span>
-      </div>
-      <div className="flex items-center gap-4 text-muted-foreground">
-        {tradeline.accountNumberMasked && <span>#{tradeline.accountNumberMasked}</span>}
-        <span>{tradeline.accountType}</span>
-        {tradeline.balance != null && <span>${tradeline.balance.toLocaleString()}</span>}
-        <span className="ml-auto text-[10px]">{tradeline.bureaus?.join(", ")}</span>
-      </div>
+    <div className="bg-background/30 border border-border rounded-lg text-xs font-mono">
+      <button
+        className="w-full p-3 text-left hover:bg-secondary/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-foreground font-medium">{tradeline.creditorName}</span>
+          <div className="flex items-center gap-2">
+            <span className={`px-1.5 py-0.5 rounded text-[10px] border ${statusClass}`}>
+              {tradeline.aggregateStatus}
+            </span>
+            {bureauDetails.length > 0 && (
+              expanded
+                ? <ChevronUp className="w-3 h-3 text-muted-foreground" />
+                : <ChevronDown className="w-3 h-3 text-muted-foreground" />
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-muted-foreground">
+          {tradeline.accountNumberMasked && <span>#{tradeline.accountNumberMasked}</span>}
+          <span>{tradeline.accountType}</span>
+          {tradeline.balance != null && <span>${tradeline.balance.toLocaleString()}</span>}
+          <span className="ml-auto text-[10px]">{reportedBureaus.join(", ")}</span>
+        </div>
+      </button>
+
+      {/* Expanded tri-bureau detail view */}
+      {expanded && bureauDetails.length > 0 && (
+        <div className="px-3 pb-3 border-t border-border/50">
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border/50">
+                  <th className="text-left py-1 px-1 text-muted-foreground font-normal w-1/4"></th>
+                  {allBureaus.map(bureau => {
+                    const hasDetail = !!getBureauDetail(bureau);
+                    const isReported = reportedBureaus.includes(bureau);
+                    return (
+                      <th
+                        key={bureau}
+                        className={`text-center py-1 px-1 font-medium text-[10px] ${
+                          hasDetail ? "text-primary" :
+                          isReported ? "text-muted-foreground" :
+                          "text-muted-foreground/30"
+                        }`}
+                      >
+                        {bureau}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {activeFields.map(field => (
+                  <tr key={field.key} className="border-b border-border/30">
+                    <td className="py-1 px-1 text-muted-foreground text-[10px]">{field.label}</td>
+                    {allBureaus.map(bureau => {
+                      const detail = getBureauDetail(bureau);
+                      const val = detail ? formatDetailValue(detail[field.key], field.format) : null;
+                      return (
+                        <td
+                          key={bureau}
+                          className={`text-center py-1 px-1 text-[10px] ${
+                            val ? "text-foreground" : "text-muted-foreground/30"
+                          }`}
+                        >
+                          {val || "--"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Per-bureau remarks */}
+          {allBureaus.map(bureau => {
+            const detail = getBureauDetail(bureau);
+            const remarks = detail?.remarks || [];
+            if (remarks.length === 0) return null;
+            return (
+              <div key={bureau} className="mt-2">
+                <p className="text-[10px] text-primary font-medium">{bureau} Remarks:</p>
+                {remarks.map((r: string, ri: number) => (
+                  <p key={ri} className="text-[10px] text-muted-foreground ml-2">- {r}</p>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JsonViewer({ data }: { data: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const jsonStr = JSON.stringify(data, null, 2);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(jsonStr).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-secondary/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Code className="w-4 h-4 text-primary" />
+          <span className="font-display text-sm text-foreground">Raw JSON</span>
+          <span className="text-[10px] font-mono text-muted-foreground">({(jsonStr.length / 1024).toFixed(1)} KB)</span>
+        </div>
+        {expanded ? (
+          <ChevronUp className="w-4 h-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-muted-foreground" />
+        )}
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-5 pb-4">
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={handleCopy}
+                  className="px-3 py-1 text-[10px] font-mono bg-secondary border border-border rounded hover:bg-secondary/80 transition-colors text-muted-foreground"
+                >
+                  {copied ? "Copied!" : "Copy JSON"}
+                </button>
+              </div>
+              <pre className="bg-background/50 border border-border rounded-lg p-4 overflow-auto max-h-[500px] text-[11px] font-mono text-foreground whitespace-pre-wrap break-words">
+                {jsonStr}
+              </pre>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
