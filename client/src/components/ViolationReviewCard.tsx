@@ -88,12 +88,12 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <SeverityBadge severity={reviewStatus === "modified" && violation.severityOverride ? violation.severityOverride : violation.severity} />
-          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${categoryColor}`}>
+          <span className={`text-xs font-mono px-2 py-0.5 rounded border ${categoryColor}`}>
             {categoryLabel}
           </span>
-          <span className="text-sm text-foreground font-medium truncate">{violation.violationType}</span>
+          <span className="text-sm text-foreground font-semibold">{violation.violationType}</span>
           {violation.confidence && (
-            <span className={`text-[10px] font-mono ${confidenceColors[violation.confidence] || "text-muted-foreground"}`}>
+            <span className={`text-xs font-mono font-medium ${confidenceColors[violation.confidence] || "text-muted-foreground"}`}>
               {violation.confidence}
             </span>
           )}
@@ -112,19 +112,19 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
         <div className="px-5 pb-5 border-t border-border/50 space-y-4">
           {/* AI Detection Summary */}
           <div className="pt-4">
-            <h4 className="text-xs font-mono text-primary mb-2">AI DETECTION SUMMARY</h4>
-            <p className="text-xs font-mono text-muted-foreground leading-relaxed">
+            <h4 className="text-sm font-mono font-semibold text-primary mb-2">AI DETECTION SUMMARY</h4>
+            <p className="text-sm font-mono text-foreground/80 leading-relaxed">
               {reviewStatus === "modified" && descriptionOverride !== violation.explanation
                 ? descriptionOverride
                 : violation.explanation}
             </p>
             {violation.evidence && (
-              <p className="text-xs font-mono text-muted-foreground/70 mt-1.5 italic">Evidence: {violation.evidence}</p>
+              <p className="text-sm font-mono text-foreground/60 mt-2 italic">Evidence: {violation.evidence}</p>
             )}
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-xs font-mono text-primary">{violation.fcraStatute}</span>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-sm font-mono font-medium text-primary">{violation.fcraStatute}</span>
               {violation.matchedRule && (
-                <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{violation.matchedRule}</span>
+                <span className="text-xs font-mono text-foreground/70 bg-secondary px-2 py-1 rounded">{violation.matchedRule}</span>
               )}
             </div>
           </div>
@@ -132,11 +132,11 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
           {/* Evidence Required */}
           {violation.evidenceRequired && (
             <div>
-              <h4 className="text-xs font-mono text-primary mb-2">EVIDENCE REQUIRED</h4>
+              <h4 className="text-sm font-mono font-semibold text-primary mb-2">EVIDENCE REQUIRED</h4>
               <div className="bg-background border border-border rounded-lg p-3">
-                <p className="text-xs font-mono text-muted-foreground">{violation.evidenceRequired}</p>
+                <p className="text-sm font-mono text-foreground/80">{violation.evidenceRequired}</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                  <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
                     violation.evidenceProvided
                       ? "border-green-500/30 text-green-600 bg-green-500/10"
                       : "border-yellow-500/30 text-yellow-600 bg-yellow-500/10"
@@ -145,7 +145,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                   </span>
                 </div>
                 {reviewStatus === "confirmed" && !violation.evidenceProvided && (
-                  <p className="text-xs font-mono text-yellow-600 mt-2">
+                  <p className="text-sm font-mono text-yellow-600 mt-2">
                     This violation is confirmed but lacks supporting documentation. Strong violations require evidence for escalation.
                   </p>
                 )}
@@ -156,9 +156,9 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
           {/* CRO Reminder */}
           {violation.croReminder && (
             <div>
-              <h4 className="text-xs font-mono text-primary mb-2">CRO REMINDER</h4>
+              <h4 className="text-sm font-mono font-semibold text-primary mb-2">CRO REMINDER</h4>
               <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3">
-                <p className="text-xs font-mono text-yellow-600">{violation.croReminder}</p>
+                <p className="text-sm font-mono text-yellow-700 dark:text-yellow-500">{violation.croReminder}</p>
               </div>
             </div>
           )}
@@ -166,7 +166,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
           {/* Human Review Controls */}
           {!isLocked && (
             <div>
-              <h4 className="text-xs font-mono text-primary mb-3">REVIEW DECISION</h4>
+              <h4 className="text-sm font-mono font-semibold text-primary mb-3">REVIEW DECISION</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                 {REVIEW_STATUSES.map((rs) => {
                   const Icon = rs.icon;
@@ -182,7 +182,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                       }`}
                     >
                       <Icon className="w-4 h-4 mb-1" />
-                      <div className="text-xs font-mono">{rs.label}</div>
+                      <div className="text-sm font-mono">{rs.label}</div>
                     </button>
                   );
                 })}
@@ -192,7 +192,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
               {reviewStatus === "modified" && (
                 <div className="space-y-3 mb-4 p-4 bg-background border border-border rounded-lg">
                   <div>
-                    <label className="text-xs font-mono text-muted-foreground mb-1 block">Severity Override</label>
+                    <label className="text-sm font-mono text-foreground/70 mb-1 block">Severity Override</label>
                     <select
                       value={severityOverride}
                       onChange={(e) => setSeverityOverride(e.target.value)}
@@ -204,7 +204,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-mono text-muted-foreground mb-1 block">Description Override</label>
+                    <label className="text-sm font-mono text-foreground/70 mb-1 block">Description Override</label>
                     <textarea
                       value={descriptionOverride}
                       onChange={(e) => setDescriptionOverride(e.target.value)}
@@ -217,7 +217,7 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
 
               {/* Reviewer Notes */}
               <div>
-                <label className="text-xs font-mono text-muted-foreground mb-1 block">Reviewer Notes</label>
+                <label className="text-sm font-mono text-foreground/70 mb-1 block">Reviewer Notes</label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
@@ -233,11 +233,11 @@ export default function ViolationReviewCard({ violation, scanId, isLocked, revie
           {/* Locked state */}
           {isLocked && isReviewed && (
             <div className="bg-secondary/30 border border-border rounded-lg p-3">
-              <p className="text-xs font-mono text-muted-foreground">
-                <span className="text-foreground">Review:</span> {reviewStatus} {violation.reviewedBy ? `by ${violation.reviewedBy}` : ""}
+              <p className="text-sm font-mono text-foreground/70">
+                <span className="text-foreground font-medium">Review:</span> {reviewStatus} {violation.reviewedBy ? `by ${violation.reviewedBy}` : ""}
                 {violation.reviewedAt ? ` on ${new Date(violation.reviewedAt).toLocaleDateString()}` : ""}
               </p>
-              {notes && <p className="text-xs font-mono text-muted-foreground mt-1">Notes: {notes}</p>}
+              {notes && <p className="text-sm font-mono text-foreground/70 mt-1">Notes: {notes}</p>}
             </div>
           )}
         </div>
@@ -254,7 +254,7 @@ function SeverityBadge({ severity }: { severity: string }) {
     low: "bg-blue-500/20 text-blue-500 border-blue-500/30",
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono border ${colors[severity] || colors.medium}`}>
+    <span className={`px-2.5 py-1 rounded text-xs uppercase font-mono font-semibold border ${colors[severity] || colors.medium}`}>
       {severity}
     </span>
   );
@@ -270,7 +270,7 @@ function ReviewStatusBadge({ status }: { status: string }) {
   };
   const info = map[status] || map.pending;
   return (
-    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${info.color}`}>
+    <span className={`text-xs font-mono font-medium px-2.5 py-1 rounded border ${info.color}`}>
       {info.label}
     </span>
   );

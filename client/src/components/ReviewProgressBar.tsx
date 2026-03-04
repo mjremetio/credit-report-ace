@@ -26,7 +26,7 @@ export default function ReviewProgressBar({ scanId }: ReviewProgressBarProps) {
           Review Progress: {reviewed} of {summary.total} violations reviewed [{percent}%]
         </h3>
         {!allReviewed && (
-          <span className="text-xs font-mono text-yellow-600">Review all violations to unlock export</span>
+          <span className="text-xs font-mono text-yellow-600">{summary.pending} violation{summary.pending !== 1 ? "s" : ""} pending review</span>
         )}
       </div>
 

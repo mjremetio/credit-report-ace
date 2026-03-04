@@ -111,7 +111,7 @@ export default function ReviewDashboard() {
               <RotateCcw className="w-3.5 h-3.5" /> Reopen Review
             </button>
           )}
-          <ExportButtons scanId={scanId} isApproved={isApproved} />
+          <ExportButtons scanId={scanId} />
         </div>
       </header>
 
@@ -270,12 +270,12 @@ export default function ReviewDashboard() {
           </motion.div>
         )}
 
-        {/* Not all reviewed message */}
+        {/* Review progress reminder */}
         {isUnderReview && !allReviewed && summary && summary.total > 0 && (
           <div className="bg-card border border-border rounded-xl p-5 text-center">
-            <Lock className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+            <AlertTriangle className="w-6 h-6 text-yellow-500 mx-auto mb-2" />
             <p className="text-sm font-mono text-muted-foreground">
-              Review all {summary.pending} remaining violation{summary.pending !== 1 ? "s" : ""} to unlock export.
+              {summary.pending} violation{summary.pending !== 1 ? "s" : ""} still pending review.
             </p>
           </div>
         )}

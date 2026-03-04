@@ -47,11 +47,11 @@ export default function EvidenceTracker({ violations }: EvidenceTrackerProps) {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-mono text-foreground truncate">{v.violationType}</p>
-              <p className="text-[10px] font-mono text-muted-foreground truncate">{v.evidenceRequired}</p>
+              <p className="text-sm font-mono text-foreground truncate">{v.violationType}</p>
+              <p className="text-xs font-mono text-foreground/60 truncate">{v.evidenceRequired}</p>
             </div>
             {v.evidenceNotes && (
-              <span className="text-[10px] font-mono text-muted-foreground">{v.evidenceNotes}</span>
+              <span className="text-xs font-mono text-foreground/60">{v.evidenceNotes}</span>
             )}
           </div>
         ))}

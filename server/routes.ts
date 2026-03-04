@@ -661,16 +661,12 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/scans/:id/export/pdf — Export approved scan as PDF
+  // GET /api/scans/:id/export/pdf — Export scan as PDF (available anytime)
   app.get("/api/scans/:id/export/pdf", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const scan = await storage.getScan(id);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
-
-      if (scan.reviewStatus !== "approved" && scan.reviewStatus !== "exported") {
-        return res.status(403).json({ error: "Export not available. Complete review and approve the report first." });
-      }
 
       const negAccounts = await storage.getNegativeAccountsByScan(id);
       const accountsWithViolations = await Promise.all(
@@ -680,16 +676,16 @@ export async function registerRoutes(
         })
       );
 
-      // Filter to approved violations only (confirmed + modified, exclude rejected)
-      const approvedViolations = accountsWithViolations.flatMap(a =>
-        a.violations.filter(v => v.reviewStatus === "confirmed" || v.reviewStatus === "modified")
+      // Include all violations except rejected ones
+      const includedViolations = accountsWithViolations.flatMap(a =>
+        a.violations.filter(v => v.reviewStatus !== "rejected")
       );
 
       const severityBreakdown = {
-        critical: approvedViolations.filter(v => (v.severityOverride || v.severity) === "critical").length,
-        high: approvedViolations.filter(v => (v.severityOverride || v.severity) === "high").length,
-        medium: approvedViolations.filter(v => (v.severityOverride || v.severity) === "medium").length,
-        low: approvedViolations.filter(v => (v.severityOverride || v.severity) === "low").length,
+        critical: includedViolations.filter(v => (v.severityOverride || v.severity) === "critical").length,
+        high: includedViolations.filter(v => (v.severityOverride || v.severity) === "high").length,
+        medium: includedViolations.filter(v => (v.severityOverride || v.severity) === "medium").length,
+        low: includedViolations.filter(v => (v.severityOverride || v.severity) === "low").length,
       };
 
       // Build PDF-like JSON response (actual PDF generation would use pdfkit)
@@ -699,10 +695,12 @@ export async function registerRoutes(
         clientName: scan.clientName || scan.consumerName,
         clientState: scan.clientState,
         date: new Date().toISOString(),
-        reviewStamp: `Reviewed and Approved by ${scan.reviewedBy} on ${scan.reviewedAt ? new Date(scan.reviewedAt).toLocaleDateString() : "N/A"}`,
+        reviewStamp: scan.reviewedBy
+          ? `Reviewed and Approved by ${scan.reviewedBy} on ${scan.reviewedAt ? new Date(scan.reviewedAt).toLocaleDateString() : "N/A"}`
+          : "Pending review",
         summary: {
           totalAccounts: negAccounts.length,
-          approvedViolations: approvedViolations.length,
+          totalViolations: includedViolations.length,
           severityBreakdown,
         },
         accounts: accountsWithViolations.map(a => ({
@@ -710,7 +708,7 @@ export async function registerRoutes(
           accountType: a.accountType,
           balance: a.balance,
           violations: a.violations
-            .filter(v => v.reviewStatus === "confirmed" || v.reviewStatus === "modified")
+            .filter(v => v.reviewStatus !== "rejected")
             .map(v => ({
               violationType: v.violationType,
               severity: v.severityOverride || v.severity,
@@ -719,15 +717,20 @@ export async function registerRoutes(
               category: v.category,
               confidence: v.confidence,
               evidenceStatus: v.evidenceProvided ? "Provided" : "Missing",
+              reviewStatus: v.reviewStatus || "pending",
               reviewerNotes: v.reviewerNotes,
             })),
         })),
         reviewNotes: scan.reviewNotes,
-        disclaimer: "This report has been reviewed by a human analyst. The information is provided for dispute purposes only.",
+        disclaimer: scan.reviewedBy
+          ? "This report has been reviewed by a human analyst. The information is provided for dispute purposes only."
+          : "This report has not yet been reviewed by a human analyst. The violations listed are AI-detected and pending review.",
       };
 
-      // Mark as exported
-      await storage.updateScan(id, { reviewStatus: "exported" });
+      // Only mark as exported if previously approved
+      if (scan.reviewStatus === "approved") {
+        await storage.updateScan(id, { reviewStatus: "exported" });
+      }
 
       res.setHeader("Content-Type", "application/json");
       res.json(pdfData);
@@ -737,16 +740,12 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/scans/:id/export/csv — Export approved scan as CSV
+  // GET /api/scans/:id/export/csv — Export scan as CSV (available anytime)
   app.get("/api/scans/:id/export/csv", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const scan = await storage.getScan(id);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
-
-      if (scan.reviewStatus !== "approved" && scan.reviewStatus !== "exported") {
-        return res.status(403).json({ error: "Export not available. Complete review and approve the report first." });
-      }
 
       const includeRejected = req.query.include_rejected === "true";
       const negAccounts = await storage.getNegativeAccountsByScan(id);
@@ -793,8 +792,10 @@ export async function registerRoutes(
         ...rows.map(row => row.map(cell => `"${(cell || "").replace(/"/g, '""')}"`).join(","))
       ].join("\n");
 
-      // Mark as exported
-      await storage.updateScan(id, { reviewStatus: "exported" });
+      // Only mark as exported if previously approved
+      if (scan.reviewStatus === "approved") {
+        await storage.updateScan(id, { reviewStatus: "exported" });
+      }
 
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename="lexa-report-${id}.csv"`);

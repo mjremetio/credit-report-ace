@@ -931,30 +931,30 @@ function ViolationCard({ violation }: { violation: any }) {
 
   return (
     <div data-testid={`violation-${violation.id}`} className="bg-background border border-border rounded-lg p-4">
-      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <SeverityBadge severity={violation.severity} />
-        <span className="text-sm text-foreground font-medium">{violation.violationType}</span>
+        <span className="text-sm text-foreground font-semibold">{violation.violationType}</span>
         {violation.confidence && (
-          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
+          <span className={`text-xs font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
             {violation.confidence}
           </span>
         )}
       </div>
-      <p className="text-xs font-mono text-muted-foreground leading-relaxed">{violation.explanation}</p>
+      <p className="text-sm font-mono text-foreground/80 leading-relaxed">{violation.explanation}</p>
       {violation.evidence && (
-        <p className="text-xs font-mono text-muted-foreground/70 mt-1.5 italic">Evidence: {violation.evidence}</p>
+        <p className="text-sm font-mono text-foreground/60 mt-2 italic">Evidence: {violation.evidence}</p>
       )}
       {violation.evidenceRequired && (
-        <p className="text-xs font-mono text-yellow-600/70 mt-1">Evidence needed: {violation.evidenceRequired}</p>
+        <p className="text-sm font-mono text-yellow-700 dark:text-yellow-500 mt-1">Evidence needed: {violation.evidenceRequired}</p>
       )}
-      <div className="mt-2 flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-mono text-primary">{violation.fcraStatute}</span>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-mono font-medium text-primary">{violation.fcraStatute}</span>
         {violation.matchedRule && (
-          <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">{violation.matchedRule}</span>
+          <span className="text-xs font-mono text-foreground/70 bg-secondary px-2 py-1 rounded">{violation.matchedRule}</span>
         )}
       </div>
       {violation.croReminder && (
-        <p className="text-xs font-mono text-yellow-600/60 mt-2 italic">CRO: {violation.croReminder}</p>
+        <p className="text-sm font-mono text-yellow-700 dark:text-yellow-500 mt-2 italic">CRO: {violation.croReminder}</p>
       )}
     </div>
   );
@@ -1000,7 +1000,7 @@ function SeverityBadge({ severity }: { severity: string }) {
     low: "bg-blue-500/20 text-blue-500 border-blue-500/30",
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono border ${colors[severity] || colors.medium}`}>
+    <span className={`px-2.5 py-1 rounded text-xs uppercase font-mono font-semibold border ${colors[severity] || colors.medium}`}>
       {severity}
     </span>
   );
