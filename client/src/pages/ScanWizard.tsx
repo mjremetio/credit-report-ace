@@ -47,11 +47,12 @@ export default function ScanWizard() {
   const queryClient = useQueryClient();
   const scanId = parseInt(id || "0");
 
-  const { data: scan, isLoading } = useQuery({
+  const { data: scan, isLoading, error } = useQuery({
     queryKey: ["scan", scanId],
     queryFn: () => fetchScan(scanId),
-    enabled: scanId > 0,
+    enabled: scanId > 0 && !isNaN(scanId),
     refetchInterval: 5000,
+    retry: 3,
   });
 
   const updateScanMutation = useMutation({
@@ -88,6 +89,24 @@ export default function ScanWizard() {
     return (
       <div className="h-full flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <AlertTriangle className="w-8 h-8 text-destructive mx-auto mb-3" />
+          <h2 className="font-display text-xl text-foreground mb-2">Failed to Load Scan</h2>
+          <p className="text-muted-foreground font-mono text-sm mb-4 max-w-md">{error.message}</p>
+          <div className="flex gap-3 justify-center">
+            <button onClick={() => queryClient.invalidateQueries({ queryKey: ["scan", scanId] })} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
+              Retry
+            </button>
+            <button onClick={() => navigate("/")} className="text-primary font-mono text-sm hover:underline px-4 py-2">Go Home</button>
+          </div>
+        </div>
       </div>
     );
   }

@@ -16,7 +16,13 @@ export async function fetchScans() {
 
 export async function fetchScan(id: number) {
   const res = await fetch(`/api/scans/${id}`);
-  if (!res.ok) throw new Error("Failed to fetch scan");
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Scan not found");
+    const text = await res.text();
+    let message = "Failed to fetch scan";
+    try { message = JSON.parse(text).error || message; } catch {}
+    throw new Error(message);
+  }
   return res.json();
 }
 
