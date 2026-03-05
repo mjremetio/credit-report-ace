@@ -932,6 +932,105 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/scans/:id/export/json — Export scan violations as JSON
+  app.get("/api/scans/:id/export/json", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const scan = await storage.getScan(id);
+      if (!scan) return res.status(404).json({ error: "Scan not found" });
+
+      const includeRejected = req.query.include_rejected === "true";
+      const negAccounts = await storage.getNegativeAccountsByScan(id);
+      const accountsWithViolations = await Promise.all(
+        negAccounts.map(async (acct) => {
+          const acctViolations = await storage.getViolationsByAccount(acct.id);
+          return { ...acct, violations: acctViolations };
+        })
+      );
+
+      const accounts = accountsWithViolations.map((acct) => {
+        const violations = acct.violations
+          .filter((v) => includeRejected || v.reviewStatus !== "rejected")
+          .map((v) => ({
+            id: v.id,
+            violationType: v.violationType,
+            severity: v.reviewStatus === "modified" && v.severityOverride ? v.severityOverride : v.severity,
+            explanation: v.reviewStatus === "modified" && v.descriptionOverride ? v.descriptionOverride : v.explanation,
+            category: v.category || "FCRA_REPORTING",
+            fcraStatute: v.fcraStatute || null,
+            evidence: v.evidence || null,
+            matchedRule: v.matchedRule || null,
+            confidence: v.confidence || null,
+            croReminder: v.croReminder || null,
+            evidenceRequired: v.evidenceRequired || null,
+            evidenceProvided: v.evidenceProvided || false,
+            evidenceNotes: v.evidenceNotes || null,
+            reviewStatus: v.reviewStatus || "pending",
+            reviewerNotes: v.reviewerNotes || null,
+            paralegalNotes: v.paralegalNotes || null,
+            detectedAt: v.createdAt || null,
+            reviewedAt: v.reviewedAt || null,
+            reviewedBy: v.reviewedBy || null,
+          }));
+
+        return {
+          id: acct.id,
+          creditor: acct.creditor,
+          accountNumber: acct.accountNumber || null,
+          accountType: formatAccountType(acct.accountType),
+          originalCreditor: acct.originalCreditor || null,
+          balance: acct.balance != null ? Number(acct.balance) : null,
+          status: acct.status || null,
+          bureaus: acct.bureaus || null,
+          violations,
+        };
+      });
+
+      const totalViolations = accounts.reduce((sum, a) => sum + a.violations.length, 0);
+      const severityCounts = accounts.reduce(
+        (counts, a) => {
+          for (const v of a.violations) {
+            const sev = v.severity as string;
+            if (sev in counts) counts[sev as keyof typeof counts]++;
+          }
+          return counts;
+        },
+        { critical: 0, high: 0, medium: 0, low: 0 }
+      );
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        scan: {
+          id: scan.id,
+          consumerName: scan.consumerName || null,
+          clientName: scan.clientName || null,
+          clientState: scan.clientState || null,
+          reportTitle: scan.reportTitle || null,
+          reviewStatus: scan.reviewStatus || "pending",
+          createdAt: scan.createdAt || null,
+        },
+        summary: {
+          totalAccounts: accounts.length,
+          totalViolations,
+          severityBreakdown: severityCounts,
+        },
+        accounts,
+      };
+
+      // Only mark as exported if previously approved
+      if (scan.reviewStatus === "approved") {
+        await storage.updateScan(id, { reviewStatus: "exported" });
+      }
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="lexa-report-${id}.json"`);
+      res.json(exportData);
+    } catch (error) {
+      console.error("Error exporting JSON:", error);
+      res.status(500).json({ error: "Failed to export JSON" });
+    }
+  });
+
   // PATCH /api/scans/:id/report — Save report metadata
   app.patch("/api/scans/:id/report", async (req, res) => {
     try {
