@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
@@ -154,12 +154,18 @@ export default function ScanWizard() {
       </header>
 
       <div className="max-w-5xl mx-auto px-6 py-8">
-        <AnimatePresence mode="wait">
-          {step === 1 && <Step1Welcome key="s1" scan={scan} scanId={scanId} goToStep={goToStep} />}
-          {step === 2 && <Step2AddAccounts key="s2" scan={scan} scanId={scanId} goToStep={goToStep} />}
-          {step === 3 && <Step3Classify key="s3" scan={scan} scanId={scanId} goToStep={goToStep} />}
-          {step === 4 && <Step4NextSteps key="s4" scan={scan} scanId={scanId} goToStep={goToStep} navigate={navigate} />}
-        </AnimatePresence>
+        <div className={step === 1 ? "" : "hidden"}>
+          <Step1Welcome scan={scan} scanId={scanId} goToStep={goToStep} />
+        </div>
+        <div className={step === 2 ? "" : "hidden"}>
+          <Step2AddAccounts scan={scan} scanId={scanId} goToStep={goToStep} />
+        </div>
+        <div className={step === 3 ? "" : "hidden"}>
+          <Step3Classify scan={scan} scanId={scanId} goToStep={goToStep} />
+        </div>
+        <div className={step === 4 ? "" : "hidden"}>
+          <Step4NextSteps scan={scan} scanId={scanId} goToStep={goToStep} navigate={navigate} />
+        </div>
       </div>
     </div>
   );
@@ -188,7 +194,7 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
   };
 
   return (
-    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto">
       <div className="text-center mb-10">
         <div className="p-4 rounded-full bg-primary/10 inline-block mb-4">
           <Shield className="w-10 h-10 text-primary" />
@@ -261,7 +267,7 @@ function Step1Welcome({ scan, scanId, goToStep }: { scan: any; scanId: number; g
           Begin <ArrowRight className="w-5 h-5" />
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -298,7 +304,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
   const negAccounts = scan.negativeAccounts || [];
 
   return (
-    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+    <div>
       <div className="mb-8">
         <h2 className="font-display text-2xl text-foreground mb-2">Add Negative Accounts</h2>
         <p className="text-muted-foreground font-mono text-sm">
@@ -407,7 +413,7 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
           Classify Accounts <ArrowRight className="w-4 h-4" />
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -426,7 +432,7 @@ function Step3Classify({ scan, scanId, goToStep }: { scan: any; scanId: number; 
   };
 
   return (
-    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+    <div>
       <div className="mb-8">
         <h2 className="font-display text-2xl text-foreground mb-2">Classify Your Accounts</h2>
         <p className="text-muted-foreground font-mono text-sm">
@@ -461,7 +467,7 @@ function Step3Classify({ scan, scanId, goToStep }: { scan: any; scanId: number; 
           View Next Steps <ArrowRight className="w-4 h-4" />
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -476,6 +482,35 @@ function AccountClassifyCard({ account, index, onUpdate }: { account: any; index
     status: account.status || "",
     bureaus: account.bureaus || "",
   });
+
+  // Keep a ref to the latest local values and account for the cleanup effect
+  const localValuesRef = useRef(localValues);
+  const accountRef = useRef(account);
+  const onUpdateRef = useRef(onUpdate);
+  localValuesRef.current = localValues;
+  accountRef.current = account;
+  onUpdateRef.current = onUpdate;
+
+  // Save any dirty (unsaved) fields on unmount
+  useEffect(() => {
+    return () => {
+      const vals = localValuesRef.current;
+      const acct = accountRef.current;
+      const update = onUpdateRef.current;
+      const fields = ["accountNumber", "originalCreditor", "balance", "dateOpened", "dateOfDelinquency", "status", "bureaus"];
+      let hasDirty = false;
+      for (const field of fields) {
+        const local = (vals as any)[field];
+        if (local !== (acct[field] || "")) {
+          update(field, local);
+          hasDirty = true;
+        }
+      }
+      if (hasDirty && acct.workflowStep === "pending") {
+        update("workflowStep", "classified");
+      }
+    };
+  }, []);
 
   const handleBlur = (field: string) => {
     const val = (localValues as any)[field];
@@ -667,7 +702,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   );
 
   return (
-    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+    <div>
       {/* Workflow Progress */}
       <div className="mb-6 bg-card border border-border rounded-xl p-5">
         <h4 className="font-display text-foreground text-sm mb-3">
@@ -920,23 +955,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             {organizedReport.accountHistory?.length > 0 ? (
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {organizedReport.accountHistory.map((tl: any, i: number) => (
-                  <div key={i} className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
-                    <div className="flex justify-between items-center">
-                      <span className="text-foreground font-medium">{tl.creditorName}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] border ${
-                          tl.aggregateStatus === "current" ? "border-green-500/30 text-green-600 bg-green-500/10" :
-                          "border-red-500/30 text-red-600 bg-red-500/10"
-                        }`}>{tl.aggregateStatus}</span>
-                        <span className="text-muted-foreground text-[10px]">{tl.bureaus?.join(", ")}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-4 mt-1 text-muted-foreground">
-                      {tl.accountType && <span>Type: {tl.accountType}</span>}
-                      {tl.balance != null && <span>Balance: ${Number(tl.balance).toLocaleString()}</span>}
-                      {tl.accountNumberMasked && <span>Acct: {tl.accountNumberMasked}</span>}
-                    </div>
-                  </div>
+                  <TradelineDetailRow key={i} tradeline={tl} />
                 ))}
               </div>
             ) : (
@@ -1330,7 +1349,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           </button>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -1418,6 +1437,234 @@ function ViolationCard({ violation }: { violation: any }) {
       </div>
       {violation.croReminder && (
         <p className="text-sm font-mono text-yellow-700 dark:text-yellow-500 mt-2 italic">CRO: {violation.croReminder}</p>
+      )}
+    </div>
+  );
+}
+
+function TradelineDetailRow({ tradeline }: { tradeline: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const statusColors: Record<string, string> = {
+    current: "text-green-600 bg-green-500/10 border-green-500/30",
+    closed: "text-muted-foreground bg-secondary border-border",
+    paid: "text-green-600 bg-green-500/10 border-green-500/30",
+    late: "text-yellow-600 bg-yellow-500/10 border-yellow-500/30",
+    chargeoff: "text-destructive bg-destructive/10 border-destructive/30",
+    collection: "text-destructive bg-destructive/10 border-destructive/30",
+    derogatory: "text-destructive bg-destructive/10 border-destructive/30",
+    repossession: "text-destructive bg-destructive/10 border-destructive/30",
+  };
+
+  const statusClass = statusColors[tradeline.aggregateStatus] || "text-muted-foreground bg-secondary border-border";
+  const bureauDetails: any[] = tradeline.bureauDetails || [];
+  const allBureaus = ["TransUnion", "Experian", "Equifax"] as const;
+
+  const getBureauDetail = (bureau: string) =>
+    bureauDetails.find((bd: any) => bd.bureau === bureau) || null;
+
+  const reportedBureaus = allBureaus.filter(b =>
+    (tradeline.bureaus || []).includes(b) || getBureauDetail(b)
+  );
+
+  const detailFields: Array<{ label: string; key: string; format?: "currency" | "date" }> = [
+    { label: "Account #", key: "accountNumber" },
+    { label: "Status", key: "status" },
+    { label: "Balance", key: "balance", format: "currency" },
+    { label: "Credit Limit", key: "creditLimit", format: "currency" },
+    { label: "High Balance", key: "highBalance", format: "currency" },
+    { label: "Monthly Payment", key: "monthlyPayment", format: "currency" },
+    { label: "Past Due", key: "pastDueAmount", format: "currency" },
+    { label: "Date Opened", key: "dateOpened", format: "date" },
+    { label: "Date Closed", key: "dateClosed", format: "date" },
+    { label: "Last Payment", key: "lastPaymentDate", format: "date" },
+    { label: "Last Reported", key: "lastReportedDate", format: "date" },
+    { label: "Payment Status", key: "paymentStatus" },
+    { label: "Account Rating", key: "accountRating" },
+    { label: "Creditor Type", key: "creditorType" },
+    { label: "Terms", key: "terms" },
+  ];
+
+  const formatDetailValue = (val: any, format?: string) => {
+    if (val == null || val === undefined || val === "") return null;
+    if (format === "currency") return `$${Number(val).toLocaleString()}`;
+    return String(val);
+  };
+
+  const activeFields = detailFields.filter(field =>
+    allBureaus.some(b => {
+      const detail = getBureauDetail(b);
+      return detail && formatDetailValue(detail[field.key], field.format) !== null;
+    })
+  );
+
+  return (
+    <div className="bg-background/30 border border-border rounded-lg text-xs font-mono">
+      <button
+        className="w-full p-3 text-left hover:bg-secondary/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-foreground font-medium">{tradeline.creditorName}</span>
+          <div className="flex items-center gap-2">
+            <span className={`px-1.5 py-0.5 rounded text-[10px] border ${statusClass}`}>
+              {tradeline.aggregateStatus}
+            </span>
+            {bureauDetails.length > 0 && (
+              expanded
+                ? <ArrowLeft className="w-3 h-3 text-muted-foreground rotate-90" />
+                : <ArrowRight className="w-3 h-3 text-muted-foreground rotate-90" />
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-muted-foreground">
+          {tradeline.accountNumberMasked && <span>#{tradeline.accountNumberMasked}</span>}
+          <span>{tradeline.accountType}</span>
+          {tradeline.balance != null && <span>${tradeline.balance.toLocaleString()}</span>}
+          <span className="ml-auto text-[10px]">{reportedBureaus.join(", ")}</span>
+        </div>
+      </button>
+
+      {expanded && bureauDetails.length > 0 && (
+        <div className="px-3 pb-3 border-t border-border/50">
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border/50">
+                  <th className="text-left py-1 px-1 text-muted-foreground font-normal w-1/4"></th>
+                  {allBureaus.map(bureau => {
+                    const hasDetail = !!getBureauDetail(bureau);
+                    const isReported = reportedBureaus.includes(bureau);
+                    return (
+                      <th
+                        key={bureau}
+                        className={`text-center py-1 px-1 font-medium text-[10px] ${
+                          hasDetail ? "text-primary" :
+                          isReported ? "text-muted-foreground" :
+                          "text-muted-foreground/30"
+                        }`}
+                      >
+                        {bureau}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {activeFields.map(field => (
+                  <tr key={field.key} className="border-b border-border/30">
+                    <td className="py-1 px-1 text-muted-foreground text-[10px]">{field.label}</td>
+                    {allBureaus.map(bureau => {
+                      const detail = getBureauDetail(bureau);
+                      const val = detail ? formatDetailValue(detail[field.key], field.format) : null;
+                      return (
+                        <td
+                          key={bureau}
+                          className={`text-center py-1 px-1 text-[10px] ${
+                            val ? "text-foreground" : "text-muted-foreground/30"
+                          }`}
+                        >
+                          {val || "--"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {allBureaus.some(b => {
+            const detail = getBureauDetail(b);
+            return detail?.paymentHistory && detail.paymentHistory.length > 0;
+          }) && (
+            <div className="mt-3">
+              <p className="text-[10px] font-mono text-muted-foreground font-medium mb-2">Two-Year Payment History</p>
+              {allBureaus.map(bureau => {
+                const detail = getBureauDetail(bureau);
+                const history = detail?.paymentHistory || [];
+                if (history.length === 0) return null;
+                return (
+                  <div key={bureau} className="mb-2">
+                    <p className="text-[10px] font-mono text-primary mb-1">{bureau}</p>
+                    <div className="flex flex-wrap gap-0.5">
+                      {history.map((entry: any, idx: number) => {
+                        const code = entry.code || "--";
+                        const isOk = code === "C" || code === "OK";
+                        const isLate = /^(30|60|90|120|150)$/.test(code);
+                        const isSevere = code === "CO" || code === "CL" || code === "BK";
+                        const bgClass = isOk
+                          ? "bg-green-500/20 text-green-600 border-green-500/30"
+                          : isLate
+                          ? "bg-yellow-500/20 text-yellow-700 border-yellow-500/30"
+                          : isSevere
+                          ? "bg-destructive/20 text-destructive border-destructive/30"
+                          : "bg-secondary text-muted-foreground border-border";
+                        return (
+                          <div
+                            key={idx}
+                            className={`px-1 py-0.5 rounded border text-[9px] font-mono text-center min-w-[36px] ${bgClass}`}
+                            title={`${entry.month}: ${code}`}
+                          >
+                            <div className="leading-tight">{isOk ? "OK" : code}</div>
+                            <div className="text-[7px] opacity-70">{entry.month?.slice(5) || ""}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {allBureaus.some(b => getBureauDetail(b)?.daysLate7Year) && (
+            <div className="mt-3">
+              <p className="text-[10px] font-mono text-muted-foreground font-medium mb-2">Days Late - 7 Year History</p>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border/50">
+                    <th className="text-left py-1 px-1 text-muted-foreground font-normal text-[10px] w-1/4"></th>
+                    {allBureaus.map(bureau => (
+                      <th key={bureau} className={`text-center py-1 px-1 font-medium text-[10px] ${getBureauDetail(bureau)?.daysLate7Year ? "text-primary" : "text-muted-foreground/30"}`}>
+                        {bureau}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(["30", "60", "90"] as const).map(days => (
+                    <tr key={days} className="border-b border-border/30">
+                      <td className="py-1 px-1 text-muted-foreground text-[10px]">{days} Days</td>
+                      {allBureaus.map(bureau => {
+                        const detail = getBureauDetail(bureau);
+                        const val = detail?.daysLate7Year?.[days];
+                        return (
+                          <td key={bureau} className={`text-center py-1 px-1 text-[10px] ${val != null ? (val > 0 ? "text-destructive font-medium" : "text-foreground") : "text-muted-foreground/30"}`}>
+                            {val != null ? val : "--"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {allBureaus.map(bureau => {
+            const detail = getBureauDetail(bureau);
+            const remarks = detail?.remarks || [];
+            if (remarks.length === 0) return null;
+            return (
+              <div key={bureau} className="mt-2">
+                <p className="text-[10px] text-primary font-medium">{bureau} Remarks:</p>
+                {remarks.map((r: string, ri: number) => (
+                  <p key={ri} className="text-[10px] text-muted-foreground ml-2">- {r}</p>
+                ))}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
