@@ -150,10 +150,23 @@ function mergeAnalysisResults(results: AnalysisResult[]): AnalysisResult {
     }
   }
 
+  // Sort accounts and findings deterministically to ensure consistent ordering across scans
+  const sortedAccounts = Array.from(seenAccounts.values()).sort((a, b) => {
+    const keyA = `${(a.creditor || "").toLowerCase()}|${a.accountNumberMasked || ""}`;
+    const keyB = `${(b.creditor || "").toLowerCase()}|${b.accountNumberMasked || ""}`;
+    return keyA.localeCompare(keyB);
+  });
+
+  const sortedFindings = Array.from(seenFindings.values()).sort((a, b) => {
+    const keyA = `${(a.creditor || "").toLowerCase()}|${a.matchedRule || ""}|${a.findingType || ""}`;
+    const keyB = `${(b.creditor || "").toLowerCase()}|${b.matchedRule || ""}|${b.findingType || ""}`;
+    return keyA.localeCompare(keyB);
+  });
+
   return {
     consumerName,
-    accounts: Array.from(seenAccounts.values()),
-    findings: Array.from(seenFindings.values()),
+    accounts: sortedAccounts,
+    findings: sortedFindings,
   };
 }
 
