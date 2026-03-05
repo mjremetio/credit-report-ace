@@ -395,6 +395,15 @@ export async function exportCsv(scanId: number, includeRejected = false) {
   return res.text();
 }
 
+export async function exportJson(scanId: number, includeRejected = false) {
+  const res = await fetch(`/api/scans/${scanId}/export/json?include_rejected=${includeRejected}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Export not available");
+  }
+  return res.json();
+}
+
 export async function updateReportMetadata(scanId: number, data: {
   reportTitle?: string | null;
   clientName?: string | null;

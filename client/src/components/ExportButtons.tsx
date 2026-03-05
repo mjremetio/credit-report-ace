@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { FileText, Download, Loader2 } from "lucide-react";
-import { exportPdf, exportCsv } from "@/lib/api";
+import { FileText, Download, Braces, Loader2 } from "lucide-react";
+import { exportPdf, exportCsv, exportJson } from "@/lib/api";
 
 interface ExportButtonsProps {
   scanId: number;
@@ -9,6 +9,7 @@ interface ExportButtonsProps {
 export default function ExportButtons({ scanId }: ExportButtonsProps) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
+  const [exportingJson, setExportingJson] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleExportPdf = async () => {
@@ -75,6 +76,35 @@ export default function ExportButtons({ scanId }: ExportButtonsProps) {
             <Download className="w-4 h-4" />
           )}
           Export CSV
+        </button>
+        <button
+          onClick={async () => {
+            setError(null);
+            setExportingJson(true);
+            try {
+              const data = await exportJson(scanId);
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `lexa-report-${scanId}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            } catch (err: any) {
+              setError(err.message);
+            } finally {
+              setExportingJson(false);
+            }
+          }}
+          disabled={exportingJson}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+        >
+          {exportingJson ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Braces className="w-4 h-4" />
+          )}
+          Export JSON
         </button>
       </div>
 
