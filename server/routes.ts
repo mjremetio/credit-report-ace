@@ -149,7 +149,13 @@ export async function registerRoutes(
         })
       );
       const parsedReport = await storage.getParsedReportByScan(id);
-      res.json({ ...scan, negativeAccounts: accountsWithDetails, hasParsedReport: !!parsedReport });
+      res.json({
+        ...scan,
+        negativeAccounts: accountsWithDetails,
+        hasParsedReport: !!parsedReport,
+        tradelineCount: parsedReport?.tradelineCount || 0,
+        issueFlagCount: parsedReport?.issueFlagCount || 0,
+      });
     } catch (error) {
       console.error("Error fetching scan:", error);
       res.status(500).json({ error: "Failed to fetch scan" });
@@ -410,6 +416,9 @@ export async function registerRoutes(
       const scanId = parseInt(req.params.scanId);
       const scan = await storage.getScan(scanId);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
+
+      // Checkpoint: Mark step 5 (Violation Analysis in progress)
+      await storage.updateScanStep(scanId, 5);
 
       const result = await runViolationPipeline(scanId);
 

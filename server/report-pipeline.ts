@@ -696,8 +696,8 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
     console.log(`[violation-pipeline] Progress: ${processedCount}/${accountEntries.length} accounts processed`);
   }
 
-  // Update scan step to indicate violations are done
-  await storage.updateScanStep(scanId, 4);
+  // Update scan step to indicate violations are done (step 6 = Complete)
+  await storage.updateScanStep(scanId, 6);
 
   console.log(`[violation-pipeline] Complete: ${totalViolations} violations detected across ${accountEntries.length} accounts`);
 
@@ -919,9 +919,9 @@ export async function runManualEntryPipeline(scanId: number): Promise<PipelineRe
     }
   }
 
-  // Update scan status
+  // Update scan status — manual pipeline completes all steps
   await storage.updateScanStatus(scanId, "completed" as any);
-  await storage.updateScanStep(scanId, 4);
+  await storage.updateScanStep(scanId, 6);
 
   console.log(`[manual-pipeline] Complete: ${tradelines.length} tradelines, ${parsedReport.issueFlags.length} flags, ${totalViolations} violations`);
 

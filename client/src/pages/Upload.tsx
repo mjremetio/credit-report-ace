@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import {
   extractFileText, structureExtractedText, structureUploadFile,
-  runViolationAnalysis,
+  runViolationAnalysis, updateScan,
 } from "@/lib/api";
 
 type InputMode = "file" | "text";

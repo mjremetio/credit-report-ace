@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
-  deleteNegativeAccount, scanAccountForViolations, runManualAnalysisPipeline
+  deleteNegativeAccount, scanAccountForViolations, runManualAnalysisPipeline,
+  fetchOrganizedReport, runViolationAnalysis,
 } from "@/lib/api";
 
 const MANUAL_STEPS = [
@@ -65,13 +66,15 @@ export default function ScanWizard() {
   const rawStep = scan?.currentStep || 1;
   const step = isUploadBased ? Math.max(rawStep, 4) : rawStep;
 
-  // For upload-based scans, compute which upload step is active based on account state
+  // For upload-based scans, use persisted currentStep from DB (checkpointed by server pipelines)
+  // Fallback: infer from account scan state if DB step seems stale
   const negAccounts = scan?.negativeAccounts || [];
   const allScanned = negAccounts.length > 0 && negAccounts.every((a: any) => a.workflowStep === "scanned");
   const hasViolations = negAccounts.some((a: any) => a.violations?.length > 0);
-  // Upload-based scans: steps 1-4 are already done (upload, review text, structuring, review data).
-  // Step 5 = Violation Analysis (current until all accounts scanned), Step 6 = Complete.
-  const uploadActiveStep = allScanned || hasViolations ? 6 : 5;
+  // Steps: 1-3=upload/review/structuring (done), 4=review data, 5=violation analysis, 6=complete
+  const inferredStep = allScanned || hasViolations ? 6 : 5;
+  // Use the higher of DB-persisted step or inferred step (covers cases where DB is behind)
+  const uploadActiveStep = isUploadBased ? Math.max(rawStep, inferredStep >= 6 ? 6 : 5) : 5;
 
   const goToStep = (s: number) => {
     if (s >= 1 && s <= 4) {
@@ -557,6 +560,28 @@ function AccountClassifyCard({ account, index, onUpdate }: { account: any; index
 function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanId: number; goToStep: (s: number) => void; navigate: (path: string) => void }) {
   const queryClient = useQueryClient();
   const negAccounts = scan.negativeAccounts || [];
+  const hasParsedReport = scan.hasParsedReport || false;
+  const tradelineCount = scan.tradelineCount || 0;
+  const issueFlagCount = scan.issueFlagCount || 0;
+
+  // Fetch organized report data for upload-based scans
+  const { data: organizedReport } = useQuery({
+    queryKey: ["organized-report", scanId],
+    queryFn: () => fetchOrganizedReport(scanId),
+    enabled: hasParsedReport && scanId > 0,
+  });
+
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    personalInfo: true,
+    scores: true,
+    accountSummary: true,
+    tradelines: false,
+    collections: false,
+    publicRecords: false,
+    inquiries: false,
+    consumerStatements: false,
+  });
+  const toggleSection = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
   const [scanError, setScanError] = useState<string | null>(null);
@@ -602,12 +627,16 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
     setScanAllRunning(false);
   };
 
-  // Full pipeline: Convert manual entries → Structured JSON → AI Analysis
+  // Full pipeline: Use appropriate pipeline based on scan type
   const handleRunPipeline = async () => {
     setScanError(null);
     setPipelineRunning(true);
     try {
-      const result = await runManualAnalysisPipeline(scanId);
+      // Upload-based scans already have structured data; run violation-only pipeline
+      // Manual scans need the full pipeline (convert manual entries → structured JSON → violations)
+      const result = hasParsedReport
+        ? await runViolationAnalysis(scanId)
+        : await runManualAnalysisPipeline(scanId);
       setPipelineResult(result);
       queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
     } catch (err: any) {
@@ -625,7 +654,6 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const unscannedCount = negAccounts.filter((a: any) => a.workflowStep !== "scanned").length;
   const totalViolationCount = negAccounts.reduce((sum: number, a: any) => sum + (a.violations?.length || 0), 0);
   const allScanned = unscannedCount === 0 && negAccounts.length > 0;
-  const hasParsedReport = scan.hasParsedReport || false;
   const analysisComplete = allScanned || pipelineResult;
 
   // Group violations by category
@@ -649,7 +677,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               {[
                 { label: "Upload / Input", done: true },
                 { label: "Review Text", done: true },
-                { label: "AI Structuring", done: true },
+                { label: `AI Structuring — ${tradelineCount} tradeline(s), ${issueFlagCount} issue flag(s)`, done: true },
                 { label: `Review Data — ${negAccounts.length} account(s) detected`, done: true },
                 {
                   label: analysisComplete
@@ -717,16 +745,296 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
       </div>
 
+      {/* Consumer Header & Summary Stats (Upload-based scans) */}
+      {hasParsedReport && (
+        <div className="mb-6 bg-card border border-primary/30 rounded-xl p-6">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-3 rounded-full bg-primary/10">
+              <Database className="w-6 h-6 text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Consumer</p>
+              <h3 className="font-display text-2xl text-foreground">
+                {organizedReport?.personalInformation?.name || scan.consumerName || "Unknown Consumer"}
+              </h3>
+            </div>
+            <CheckCircle2 className="w-8 h-8 text-green-600" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
+              <div className="text-2xl font-display text-foreground">{tradelineCount}</div>
+              <div className="text-xs font-mono text-muted-foreground mt-1">Tradelines</div>
+            </div>
+            <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
+              <div className="text-2xl font-display text-foreground">{issueFlagCount}</div>
+              <div className="text-xs font-mono text-muted-foreground mt-1">Issue Flags</div>
+            </div>
+          </div>
+
+          <p className="text-xs font-mono text-muted-foreground mt-3 text-center">
+            Structured JSON created. Review the data below, then proceed to violation analysis.
+          </p>
+        </div>
+      )}
+
+      {/* Organized Report Sections (Upload-based scans - matching Upload page) */}
+      {hasParsedReport && organizedReport && (
+        <div className="mb-6 space-y-3">
+          {/* Personal Information */}
+          <CollapsibleSection
+            title="Personal Information"
+            icon={<Eye className="w-4 h-4 text-primary" />}
+            expanded={expandedSections.personalInfo}
+            onToggle={() => toggleSection("personalInfo")}
+          >
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <ReportField label="Full Name" value={organizedReport.personalInformation?.name} />
+                <ReportField label="SSN" value={organizedReport.personalInformation?.ssn} />
+                <ReportField label="Report Date" value={organizedReport.personalInformation?.reportDate} />
+              </div>
+
+              {organizedReport.personalInformation?.dateOfBirthPerBureau && (
+                <div>
+                  <p className="text-xs font-mono text-muted-foreground mb-2">Date of Birth</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
+                      const entry = organizedReport.personalInformation?.dateOfBirthPerBureau?.find((e: any) => e.bureau === bureau);
+                      return (
+                        <div key={bureau} className="bg-background/30 border border-border rounded-lg p-2 text-center">
+                          <p className="text-[10px] font-mono text-muted-foreground mb-0.5">{bureau}</p>
+                          <p className={`text-xs font-mono ${entry?.value ? "text-foreground" : "text-muted-foreground/50"}`}>
+                            {entry?.value || "--"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {organizedReport.personalInformation?.addresses?.length > 0 && (
+                <div>
+                  <p className="text-xs font-mono text-muted-foreground mb-2">Addresses</p>
+                  <div className="space-y-1">
+                    {organizedReport.personalInformation.addresses.map((addr: any, i: number) => (
+                      <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono text-foreground flex items-center justify-between">
+                        <span>{addr.address}</span>
+                        <span className="text-muted-foreground text-[10px]">{addr.bureaus?.join(", ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {organizedReport.personalInformation?.employers?.length > 0 && (
+                <div>
+                  <p className="text-xs font-mono text-muted-foreground mb-2">Employers</p>
+                  <div className="space-y-1">
+                    {organizedReport.personalInformation.employers.map((emp: any, i: number) => (
+                      <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono text-foreground flex items-center justify-between">
+                        <span>{emp.name}</span>
+                        <span className="text-muted-foreground text-[10px]">{emp.bureaus?.join(", ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CollapsibleSection>
+
+          {/* Credit Scores */}
+          <CollapsibleSection
+            title="Credit Scores"
+            icon={<Shield className="w-4 h-4 text-primary" />}
+            expanded={expandedSections.scores}
+            onToggle={() => toggleSection("scores")}
+          >
+            <div className="grid grid-cols-3 gap-3">
+              {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
+                const scoreData = organizedReport.creditScores?.[bureau];
+                return (
+                  <div key={bureau} className="bg-background/30 border border-border rounded-lg p-4 text-center">
+                    <p className="text-xs font-mono text-muted-foreground mb-1">{bureau}</p>
+                    <p className={`text-3xl font-display ${scoreData?.score ? "text-foreground" : "text-muted-foreground/50"}`}>
+                      {scoreData?.score ?? "N/A"}
+                    </p>
+                    {scoreData?.model && (
+                      <p className="text-[10px] font-mono text-muted-foreground mt-1">{scoreData.model}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CollapsibleSection>
+
+          {/* Account Summary */}
+          {organizedReport.accountSummary && (
+            <CollapsibleSection
+              title="Account Summary"
+              icon={<FileText className="w-4 h-4 text-primary" />}
+              expanded={expandedSections.accountSummary}
+              onToggle={() => toggleSection("accountSummary")}
+            >
+              {organizedReport.accountSummary.perBureau?.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs font-mono">
+                    <thead>
+                      <tr className="text-muted-foreground border-b border-border">
+                        <th className="text-left py-2 pr-3">Metric</th>
+                        {organizedReport.accountSummary.perBureau.map((b: any) => (
+                          <th key={b.bureau} className="text-center py-2 px-2">{b.bureau}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {["totalAccounts", "openAccounts", "closedAccounts", "derogatoryAccounts", "balanceTotal"].map(metric => (
+                        <tr key={metric} className="border-b border-border/50">
+                          <td className="py-2 pr-3 text-muted-foreground capitalize">{metric.replace(/([A-Z])/g, " $1").trim()}</td>
+                          {organizedReport.accountSummary.perBureau.map((b: any) => (
+                            <td key={b.bureau} className="text-center py-2 px-2 text-foreground">
+                              {metric === "balanceTotal" && b[metric] != null ? `$${Number(b[metric]).toLocaleString()}` : b[metric] ?? "--"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs font-mono text-muted-foreground">No account summary data.</p>
+              )}
+            </CollapsibleSection>
+          )}
+
+          {/* Account History */}
+          <CollapsibleSection
+            title={`Account History (${organizedReport.accountHistory?.length || 0})`}
+            icon={<FileText className="w-4 h-4 text-primary" />}
+            expanded={expandedSections.tradelines}
+            onToggle={() => toggleSection("tradelines")}
+          >
+            {organizedReport.accountHistory?.length > 0 ? (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {organizedReport.accountHistory.map((tl: any, i: number) => (
+                  <div key={i} className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
+                    <div className="flex justify-between items-center">
+                      <span className="text-foreground font-medium">{tl.creditorName}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] border ${
+                          tl.aggregateStatus === "current" ? "border-green-500/30 text-green-600 bg-green-500/10" :
+                          "border-red-500/30 text-red-600 bg-red-500/10"
+                        }`}>{tl.aggregateStatus}</span>
+                        <span className="text-muted-foreground text-[10px]">{tl.bureaus?.join(", ")}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-4 mt-1 text-muted-foreground">
+                      {tl.accountType && <span>Type: {tl.accountType}</span>}
+                      {tl.balance != null && <span>Balance: ${Number(tl.balance).toLocaleString()}</span>}
+                      {tl.accountNumberMasked && <span>Acct: {tl.accountNumberMasked}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs font-mono text-muted-foreground">No account history found.</p>
+            )}
+          </CollapsibleSection>
+
+          {/* Collections */}
+          {organizedReport.collections?.length > 0 && (
+            <CollapsibleSection
+              title={`Collections (${organizedReport.collections.length})`}
+              icon={<AlertTriangle className="w-4 h-4 text-destructive" />}
+              expanded={expandedSections.collections}
+              onToggle={() => toggleSection("collections")}
+            >
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {organizedReport.collections.map((tl: any, i: number) => (
+                  <div key={i} className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
+                    <div className="flex justify-between items-center">
+                      <span className="text-foreground font-medium">{tl.creditorName}</span>
+                      <span className="text-muted-foreground text-[10px]">{tl.bureaus?.join(", ")}</span>
+                    </div>
+                    <div className="flex gap-4 mt-1 text-muted-foreground">
+                      {tl.balance != null && <span>Balance: ${Number(tl.balance).toLocaleString()}</span>}
+                      {tl.originalCreditor && <span>Original: {tl.originalCreditor}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
+          )}
+
+          {/* Public Records */}
+          <CollapsibleSection
+            title={`Public Records (${organizedReport.publicInformation?.length || 0})`}
+            icon={<FileText className="w-4 h-4 text-primary" />}
+            expanded={expandedSections.publicRecords}
+            onToggle={() => toggleSection("publicRecords")}
+          >
+            {organizedReport.publicInformation?.length > 0 ? (
+              <div className="space-y-2">
+                {organizedReport.publicInformation.map((pr: any, i: number) => (
+                  <div key={i} className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
+                    <div className="flex justify-between items-center">
+                      <span className="text-foreground font-medium">{pr.type}</span>
+                      <span className="text-muted-foreground">{pr.bureaus?.join(", ")}</span>
+                    </div>
+                    {pr.court && <p className="text-muted-foreground mt-1">Court: {pr.court}</p>}
+                    {pr.dateFiled && <p className="text-muted-foreground">Filed: {pr.dateFiled}</p>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs font-mono text-muted-foreground">No public records found.</p>
+            )}
+          </CollapsibleSection>
+
+          {/* Inquiries */}
+          <CollapsibleSection
+            title={`Inquiries (${organizedReport.inquiries?.length || 0})`}
+            icon={<Eye className="w-4 h-4 text-primary" />}
+            expanded={expandedSections.inquiries}
+            onToggle={() => toggleSection("inquiries")}
+          >
+            {organizedReport.inquiries?.length > 0 ? (
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {organizedReport.inquiries.map((inq: any, i: number) => (
+                  <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono flex items-center justify-between">
+                    <span className="text-foreground">{inq.creditorName}</span>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        inq.type === "hard"
+                          ? "bg-destructive/10 text-destructive border border-destructive/30"
+                          : "bg-secondary text-muted-foreground border border-border"
+                      }`}>{inq.type}</span>
+                      <span className="text-muted-foreground">{inq.bureau}</span>
+                      <span className="text-muted-foreground">{inq.date}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs font-mono text-muted-foreground">No inquiries found.</p>
+            )}
+          </CollapsibleSection>
+        </div>
+      )}
+
       {/* Pipeline Result Banner */}
       {pipelineResult && (
         <div className="mb-6 bg-green-500/5 border border-green-500/30 rounded-xl p-5">
           <div className="flex items-center gap-3 mb-3">
             <CheckCircle2 className="w-5 h-5 text-green-600" />
-            <h4 className="font-display text-foreground text-sm">Full Analysis Pipeline Complete</h4>
+            <h4 className="font-display text-foreground text-sm">
+              {hasParsedReport ? "Violation Analysis Complete" : "Full Analysis Pipeline Complete"}
+            </h4>
           </div>
-          <div className="grid grid-cols-3 gap-4 text-center">
+          <div className={`grid gap-4 text-center ${hasParsedReport ? "grid-cols-3" : "grid-cols-3"}`}>
             <div>
-              <div className="text-2xl font-display text-foreground">{pipelineResult.accountsCreated}</div>
+              <div className="text-2xl font-display text-foreground">{hasParsedReport ? tradelineCount : pipelineResult.accountsCreated}</div>
               <div className="text-[10px] font-mono text-muted-foreground">Tradelines</div>
             </div>
             <div>
@@ -734,7 +1042,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               <div className="text-[10px] font-mono text-muted-foreground">Violations</div>
             </div>
             <div>
-              <div className="text-2xl font-display text-foreground">{pipelineResult.issueFlagsDetected}</div>
+              <div className="text-2xl font-display text-foreground">{hasParsedReport ? issueFlagCount : (pipelineResult.issueFlagsDetected || 0)}</div>
               <div className="text-[10px] font-mono text-muted-foreground">Issue Flags</div>
             </div>
           </div>
@@ -748,14 +1056,18 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             <CheckCircle2 className="w-5 h-5 text-green-600" />
             <h4 className="font-display text-foreground text-sm">Upload Analysis Complete</h4>
           </div>
-          <div className="grid grid-cols-2 gap-4 text-center">
+          <div className="grid grid-cols-3 gap-4 text-center">
             <div>
-              <div className="text-2xl font-display text-foreground">{negAccounts.length}</div>
-              <div className="text-[10px] font-mono text-muted-foreground">Accounts</div>
+              <div className="text-2xl font-display text-foreground">{tradelineCount}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Tradelines</div>
             </div>
             <div>
               <div className="text-2xl font-display text-foreground">{totalViolationCount}</div>
               <div className="text-[10px] font-mono text-muted-foreground">Violations</div>
+            </div>
+            <div>
+              <div className="text-2xl font-display text-foreground">{issueFlagCount}</div>
+              <div className="text-[10px] font-mono text-muted-foreground">Issue Flags</div>
             </div>
           </div>
         </div>
@@ -781,7 +1093,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               className="px-5 py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
             >
               {pipelineRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-              {pipelineRunning ? "Running Pipeline..." : "Run Full Analysis"}
+              {pipelineRunning ? "Running..." : hasParsedReport ? "Run Violation Analysis" : "Run Full Analysis"}
             </button>
           )}
           {unscannedCount > 0 && !pipelineRunning && (
@@ -802,9 +1114,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
       {pipelineRunning && (
         <div className="mb-6 bg-primary/5 border border-primary/30 rounded-xl p-6 text-center">
           <Activity className="w-8 h-8 text-primary animate-pulse mx-auto mb-3" />
-          <h4 className="font-display text-foreground mb-2">Running Full Analysis Pipeline...</h4>
+          <h4 className="font-display text-foreground mb-2">
+            {hasParsedReport ? "Running Violation Analysis..." : "Running Full Analysis Pipeline..."}
+          </h4>
           <p className="text-xs font-mono text-muted-foreground">
-            Converting {negAccounts.length} account(s) to structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), computing issue flags, and running AI violation analysis...
+            {hasParsedReport
+              ? `Scanning ${negAccounts.length} negative account(s) for FCRA & FDCPA violations...`
+              : `Converting ${negAccounts.length} account(s) to structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), computing issue flags, and running AI violation analysis...`
+            }
           </p>
         </div>
       )}
@@ -978,6 +1295,57 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function CollapsibleSection({
+  title, icon, expanded, onToggle, children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-secondary/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="font-display text-sm text-foreground">{title}</span>
+        </div>
+        {expanded ? (
+          <ArrowLeft className="w-4 h-4 text-muted-foreground rotate-90" />
+        ) : (
+          <ArrowRight className="w-4 h-4 text-muted-foreground rotate-90" />
+        )}
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-5 pb-4">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ReportField({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div className="bg-background/30 rounded-lg px-3 py-2">
+      <p className="text-[10px] font-mono text-muted-foreground mb-0.5">{label}</p>
+      <p className="text-xs font-mono text-foreground">{value || "N/A"}</p>
+    </div>
   );
 }
 
