@@ -20,10 +20,12 @@ const MANUAL_STEPS = [
 ];
 
 const UPLOAD_STEPS = [
-  { num: 1, label: "Uploaded", icon: UploadCloud },
-  { num: 2, label: "Structured", icon: Database },
-  { num: 3, label: "Analysis", icon: Zap },
-  { num: 4, label: "Review", icon: ClipboardCheck },
+  { num: 1, label: "Upload / Input", icon: UploadCloud },
+  { num: 2, label: "Review Text", icon: FileText },
+  { num: 3, label: "AI Structuring", icon: Activity },
+  { num: 4, label: "Review Data", icon: Eye },
+  { num: 5, label: "Violation Analysis", icon: Zap },
+  { num: 6, label: "Complete", icon: CheckCircle2 },
 ];
 
 const ACCOUNT_TYPES = [
@@ -67,7 +69,9 @@ export default function ScanWizard() {
   const negAccounts = scan?.negativeAccounts || [];
   const allScanned = negAccounts.length > 0 && negAccounts.every((a: any) => a.workflowStep === "scanned");
   const hasViolations = negAccounts.some((a: any) => a.violations?.length > 0);
-  const uploadActiveStep = allScanned || hasViolations ? 4 : 3;
+  // Upload-based scans: steps 1-4 are already done (upload, review text, structuring, review data).
+  // Step 5 = Violation Analysis (current until all accounts scanned), Step 6 = Complete.
+  const uploadActiveStep = allScanned || hasViolations ? 6 : 5;
 
   const goToStep = (s: number) => {
     if (s >= 1 && s <= 4) {
@@ -634,50 +638,82 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-      {/* Dispute Scanner Progress */}
+      {/* Workflow Progress */}
       <div className="mb-6 bg-card border border-border rounded-xl p-5">
         <h4 className="font-display text-foreground text-sm mb-3">
-          {hasParsedReport ? "Upload Progress" : "Dispute Scanner"}
+          {hasParsedReport ? "Workflow Progress" : "Dispute Scanner"}
         </h4>
         <div className="space-y-2 text-xs font-mono">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-            <span className="text-muted-foreground">
-              {hasParsedReport
-                ? `Report uploaded & structured — ${negAccounts.length} account(s) detected`
-                : `Manual data entry — ${negAccounts.length} account(s) added`}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {analysisComplete ? (
-              <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-            ) : pipelineRunning ? (
-              <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
-            ) : (
-              <Zap className="w-4 h-4 text-primary flex-shrink-0" />
-            )}
-            <span className={analysisComplete ? "text-muted-foreground" : "text-primary font-semibold"}>
-              {analysisComplete
-                ? `AI violation analysis complete — ${totalViolationCount} violation(s) found`
-                : hasParsedReport
-                ? `Run AI violation analysis — ${unscannedCount} account(s) pending`
-                : "Convert into Structured JSON & AI violation analysis"}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {analysisComplete ? (
-              <ClipboardCheck className="w-4 h-4 text-primary flex-shrink-0" />
-            ) : (
-              <ClipboardCheck className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
-            )}
-            <span className={analysisComplete ? "text-primary" : "text-muted-foreground/50"}>
-              Paralegal manual review — Edit analysis reports
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
-            <span className="text-muted-foreground/50">Export (after review & approval)</span>
-          </div>
+          {hasParsedReport ? (
+            <>
+              {[
+                { label: "Upload / Input", done: true },
+                { label: "Review Text", done: true },
+                { label: "AI Structuring", done: true },
+                { label: `Review Data — ${negAccounts.length} account(s) detected`, done: true },
+                {
+                  label: analysisComplete
+                    ? `Violation Analysis — ${totalViolationCount} violation(s) found`
+                    : `Violation Analysis — ${unscannedCount} account(s) pending`,
+                  done: analysisComplete,
+                  current: !analysisComplete,
+                },
+                { label: "Complete", done: false, current: analysisComplete },
+              ].map((item, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  {item.done ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                  ) : item.current ? (
+                    pipelineRunning ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                    ) : (
+                      <Zap className="w-4 h-4 text-primary flex-shrink-0" />
+                    )
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border border-border flex-shrink-0" />
+                  )}
+                  <span className={
+                    item.done ? "text-green-600" : item.current ? "text-primary font-semibold" : "text-muted-foreground/50"
+                  }>{item.label}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                <span className="text-muted-foreground">Manual data entry — {negAccounts.length} account(s) added</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {analysisComplete ? (
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                ) : pipelineRunning ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                ) : (
+                  <Zap className="w-4 h-4 text-primary flex-shrink-0" />
+                )}
+                <span className={analysisComplete ? "text-muted-foreground" : "text-primary font-semibold"}>
+                  {analysisComplete
+                    ? `AI violation analysis complete — ${totalViolationCount} violation(s) found`
+                    : "Convert into Structured JSON & AI violation analysis"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {analysisComplete ? (
+                  <ClipboardCheck className="w-4 h-4 text-primary flex-shrink-0" />
+                ) : (
+                  <ClipboardCheck className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
+                )}
+                <span className={analysisComplete ? "text-primary" : "text-muted-foreground/50"}>
+                  Paralegal manual review — Edit analysis reports
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
+                <span className="text-muted-foreground/50">Export (after review & approval)</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
