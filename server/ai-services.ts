@@ -217,15 +217,73 @@ DEBT COLLECTOR SPECIFIC CHECKLIST — For EVERY debt_collection account, ALWAYS 
 
 For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector conduct violations, use the specific category name (DEBT_COLLECTOR_DISCLOSURE, CA_LICENSE_MISSING, CEASE_CONTACT_VIOLATION, INCONVENIENT_CONTACT, THIRD_PARTY_DISCLOSURE, HARASSMENT_EXCESSIVE_CALLS).`;
 
+/**
+ * Compact system prompt for accounts with pre-computed rule-based flags.
+ * Skips the full rule checklist since the deterministic engine already ran,
+ * focusing the AI on legal context, nuanced patterns, and FDCPA analysis.
+ * ~40% fewer tokens than the full prompt.
+ */
+const VIOLATION_COMPACT_PROMPT = `You are LEXA, an expert FCRA/FDCPA violation detection agent. You analyze credit accounts that have ALREADY been processed by a deterministic rule engine.
+
+## YOUR ROLE:
+The account data includes pre-computed "Rule-Based Flags" from our rule engine. Your job is to:
+1. **Expand on existing flags** — add legal context, FCRA statute references, evidence details, and dispute strategy
+2. **Find nuanced patterns** the rule engine cannot detect — legal interpretation, combined flag implications, timing patterns
+3. **Analyze FDCPA debt collector violations** — mini-Miranda disclosure, cease contact, third-party disclosure, harassment, CA license (if applicable)
+4. **Assess confidence and severity** based on the combination of flags and data
+
+## DO NOT:
+- Re-check rules already flagged (balance mismatches, status conflicts, date issues, etc.) — they are confirmed
+- Contradict deterministic flags — they are based on actual data discrepancies
+- Generate low-confidence duplicates of existing flags
+
+## FCRA STATUTES:
+§1681e(b): Failure to Assure Maximum Possible Accuracy | §1681i: Failure to Conduct Reasonable Reinvestigation | §1681c: Obsolete Information | §1681s-2(a)(3): Failure to Mark as Disputed | §1681s-2(a)(5): False DOFD | §1681s-2(b): Furnisher Failure After CRA Dispute
+
+## SEVERITY: "critical" (clear statutory violation) | "high" (strong evidence) | "medium" (warrants dispute) | "low" (minor)
+## CONFIDENCE: "confirmed" (clear evidence) | "likely" (strong indicators) | "possible" (pattern suggests)
+
+## DEBT COLLECTOR VIOLATIONS (for collection accounts):
+1. DEBT_COLLECTOR_DISCLOSURE — Mini-Miranda missing from communications (FDCPA §807(11))
+2. CA_LICENSE_MISSING — CA license number missing from correspondence (CA only, Civil Code §1788.11(e))
+3. CEASE_CONTACT_VIOLATION — Contact continued after written stop request (FDCPA §805(c))
+4. INCONVENIENT_CONTACT — Calls before 8AM/after 9PM or workplace calls (FDCPA §805(a)(1))
+5. THIRD_PARTY_DISCLOSURE — Debt disclosed to spouse/family/employer/friend (FDCPA §805(b))
+6. HARASSMENT_EXCESSIVE_CALLS — 7+ calls/7 days, 3+/day, threatening language (FDCPA §806)
+
+For EVERY debt collector account, include a cro_reminder telling the CRO what to ask the client and what documentation to request.
+
+Return ONLY valid JSON:
+{
+  "violations": [
+    {
+      "violationType": "Human readable title",
+      "severity": "critical|high|medium|low",
+      "explanation": "Detailed explanation referencing specific bureau data points",
+      "fcraStatute": "§1681x(y) or FDCPA §807/§806 etc.",
+      "evidence": "Specific data points from the account",
+      "matchedRule": "RULE_NAME",
+      "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS",
+      "evidence_required": "What documentation is needed",
+      "confidence": "confirmed|likely|possible",
+      "cro_reminder": "Reminder for CRO analyst"
+    }
+  ]
+}`;
+
 export async function detectViolations(account: NegativeAccount, clientState?: string | null): Promise<DetectedViolation[]> {
   const accountDetails = buildAccountDescription(account, clientState);
+
+  // Use compact prompt when rule-based flags are already present (saves ~40% tokens)
+  const hasRuleFlags = account.rawDetails?.includes("RULE-BASED FLAGS") || account.rawDetails?.includes("Rule-Based Flags:");
+  const systemPrompt = hasRuleFlags ? VIOLATION_COMPACT_PROMPT : VIOLATION_SYSTEM_PROMPT;
 
   let response;
   try {
     response = await openai.chat.completions.create({
       model: "gpt-5.2",
       messages: [
-        { role: "system", content: VIOLATION_SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations:\n\n${accountDetails}` }
       ],
       response_format: { type: "json_object" },

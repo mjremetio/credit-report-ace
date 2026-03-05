@@ -26,7 +26,7 @@ export default function Home() {
   return (
     <div className="h-full">
       <header className="h-16 border-b border-border bg-white flex items-center px-6 justify-between">
-        <h2 className="font-display font-medium text-lg text-foreground">Dispute Scanner</h2>
+        <h2 className="font-display font-medium text-lg text-foreground">Violation Analysis</h2>
       </header>
 
       <div className="p-6">

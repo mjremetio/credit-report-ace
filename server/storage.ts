@@ -38,6 +38,7 @@ export interface IStorage {
   deleteNegativeAccount(id: number): Promise<void>;
 
   createViolation(violation: InsertViolation): Promise<Violation>;
+  createViolationsBatch(violationList: InsertViolation[]): Promise<Violation[]>;
   getViolation(id: number): Promise<Violation | undefined>;
   getViolationsByAccount(negativeAccountId: number): Promise<Violation[]>;
   getViolationsByScan(scanId: number): Promise<Violation[]>;
@@ -51,6 +52,7 @@ export interface IStorage {
   updateParsedReportFlags(id: number, flags: any[]): Promise<ParsedReport | undefined>;
   updateParsedReportSummary(id: number, summary: any): Promise<ParsedReport | undefined>;
   createTradelineEvidence(evidence: InsertTradelineEvidence): Promise<TradelineEvidence>;
+  createTradelineEvidenceBatch(evidenceList: InsertTradelineEvidence[]): Promise<TradelineEvidence[]>;
   getTradelineEvidenceByScan(parsedReportId: number): Promise<TradelineEvidence[]>;
 }
 
@@ -154,6 +156,10 @@ class DatabaseStorage implements IStorage {
     const [created] = await db.insert(violations).values(violation).returning();
     return created;
   }
+  async createViolationsBatch(violationList: InsertViolation[]): Promise<Violation[]> {
+    if (violationList.length === 0) return [];
+    return db.insert(violations).values(violationList).returning();
+  }
   async getViolation(id: number): Promise<Violation | undefined> {
     const [violation] = await db.select().from(violations).where(eq(violations.id, id));
     return violation;
@@ -215,6 +221,10 @@ class DatabaseStorage implements IStorage {
   async createTradelineEvidence(evidence: InsertTradelineEvidence): Promise<TradelineEvidence> {
     const [created] = await db.insert(tradelineEvidence).values(evidence).returning();
     return created;
+  }
+  async createTradelineEvidenceBatch(evidenceList: InsertTradelineEvidence[]): Promise<TradelineEvidence[]> {
+    if (evidenceList.length === 0) return [];
+    return db.insert(tradelineEvidence).values(evidenceList).returning();
   }
 
   async getTradelineEvidenceByScan(parsedReportId: number): Promise<TradelineEvidence[]> {

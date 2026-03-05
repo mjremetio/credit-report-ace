@@ -64,7 +64,9 @@ export default function ScanWizard() {
   // For manual scans, follow the stored currentStep.
   const isUploadBased = scan?.hasParsedReport || false;
   const rawStep = scan?.currentStep || 1;
-  const step = isUploadBased ? Math.max(rawStep, 4) : rawStep;
+  // For upload-based scans, always render Step4NextSteps (the analysis/review view)
+  // since steps 5-6 are progress indicators, not separate UI screens
+  const step = isUploadBased ? 4 : rawStep;
 
   // For upload-based scans, use persisted currentStep from DB (checkpointed by server pipelines)
   // Fallback: infer from account scan state if DB step seems stale
@@ -669,7 +671,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
       {/* Workflow Progress */}
       <div className="mb-6 bg-card border border-border rounded-xl p-5">
         <h4 className="font-display text-foreground text-sm mb-3">
-          {hasParsedReport ? "Workflow Progress" : "Dispute Scanner"}
+          {hasParsedReport ? "Workflow Progress" : "Violation Analysis"}
         </h4>
         <div className="space-y-2 text-xs font-mono">
           {hasParsedReport ? (
