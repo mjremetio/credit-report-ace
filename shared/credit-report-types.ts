@@ -104,6 +104,13 @@ export interface PaymentHistoryEntry {
   code: PaymentCode;
 }
 
+/** Per-bureau count of late payments over 7-year history */
+export interface DaysLate7Year {
+  "30": number;
+  "60": number;
+  "90": number;
+}
+
 export interface TradeBureauDetail {
   bureau: Bureau;
   accountNumber?: string;
@@ -122,6 +129,7 @@ export interface TradeBureauDetail {
   pastDueAmount?: number | null;
   terms?: string;
   paymentHistory?: PaymentHistoryEntry[];
+  daysLate7Year?: DaysLate7Year;
   remarks?: string[];
 }
 
@@ -346,6 +354,7 @@ export interface LLMTradelineExtraction {
     pastDueAmount?: number | null;
     terms?: string;
     paymentHistory?: Array<{ month: string; code: string }>;
+    daysLate7Year?: { "30": number; "60": number; "90": number };
     remarks?: string[];
   }>;
   dates?: {
