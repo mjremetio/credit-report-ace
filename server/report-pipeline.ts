@@ -62,23 +62,31 @@ export async function runReportPipeline(
   pdfBuffer?: Buffer,
   imageBuffer?: Buffer,
 ): Promise<PipelineResult> {
+  const pipelineStart = Date.now();
+
   // ── Step 1: Parse → Section Chunks ──────────────────────────────
+  console.time("[pipeline] Step 1: Parse file");
   console.log(`[pipeline] Step 1: Parsing file (${fileType})`);
   const extracted = await parseReportFile(content, fileType, pdfBuffer, imageBuffer);
   console.log(`[pipeline] Parsed ${extracted.sections.length} section(s), ${extracted.fullText.length} chars`);
+  console.timeEnd("[pipeline] Step 1: Parse file");
 
   // ── Step 2: LLM Extraction → Structured JSON ───────────────────
+  console.time("[pipeline] Step 2: LLM extraction");
   console.log(`[pipeline] Step 2: Two-pass LLM extraction`);
   const parsedReport = await extractCreditReport(
     extracted.sections,
     imageBuffer,
     fileType.startsWith("image/") ? fileType : undefined,
   );
+  console.timeEnd("[pipeline] Step 2: LLM extraction");
 
   // ── Step 3: Rule-Based Issue Flags ─────────────────────────────
+  console.time("[pipeline] Step 3: Issue flags");
   console.log(`[pipeline] Step 3: Computing deterministic issue flags`);
   parsedReport.issueFlags = computeIssueFlags(parsedReport);
   console.log(`[pipeline] ${parsedReport.issueFlags.length} issue flags detected`);
+  console.timeEnd("[pipeline] Step 3: Issue flags");
 
   // ── Step 4: Hierarchical Summaries ─────────────────────────────
   console.log(`[pipeline] Step 4: Generating hierarchical summaries`);
@@ -111,13 +119,13 @@ export async function runReportPipeline(
     issueFlagCount: parsedReport.issueFlags.length,
   });
 
-  // ── Step 7: Store per-tradeline evidence ───────────────────────
-  for (const tl of parsedReport.tradelines) {
+  // ── Step 7: Store per-tradeline evidence (batch insert) ───────
+  console.time("[pipeline] Step 7: Tradeline evidence storage");
+  const evidenceBatch = parsedReport.tradelines.map(tl => {
     const tradelineFlags = parsedReport.issueFlags.filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
     );
-
-    await storage.createTradelineEvidence({
+    return {
       parsedReportId: parsedReportRecord.id,
       creditorName: tl.creditorName,
       accountNumberMasked: tl.accountNumberMasked || null,
@@ -125,8 +133,12 @@ export async function runReportPipeline(
       evidenceText: tl.evidenceText || "",
       bureaus: tl.bureaus.join(", "),
       issueFlagsJson: tradelineFlags as any,
-    });
+    };
+  });
+  if (evidenceBatch.length > 0) {
+    await storage.createTradelineEvidenceBatch(evidenceBatch);
   }
+  console.timeEnd("[pipeline] Step 7: Tradeline evidence storage");
 
   // ── Step 8: Bridge to legacy format ────────────────────────────
   // Create NegativeAccounts + run violation detection (preserves existing workflow)
@@ -141,7 +153,8 @@ export async function runReportPipeline(
   });
 
   // Step 8a: Create all NegativeAccount records first
-  const accountEntries: Array<{ tl: Tradeline; negAccountId: number }> = [];
+  console.time("[pipeline] Step 8a: NegativeAccount creation");
+  const accountEntries: Array<{ tl: Tradeline; negAccount: any }> = [];
   for (const tl of negativeTradelines) {
     const tradelineFlags = parsedReport.issueFlags.filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
@@ -164,23 +177,21 @@ export async function runReportPipeline(
       workflowStep: "classified",
     });
 
-    accountEntries.push({ tl, negAccountId: negAccount.id });
+    accountEntries.push({ tl, negAccount });
   }
+  console.timeEnd("[pipeline] Step 8a: NegativeAccount creation");
 
-  // Step 8b: Run AI violation detection in parallel batches of 3
-  const BATCH_SIZE = 3;
+  // Step 8b: Run AI violation detection in parallel batches of 5
+  console.time("[pipeline] Step 8b: AI violation detection");
+  const BATCH_SIZE = 5;
   for (let i = 0; i < accountEntries.length; i += BATCH_SIZE) {
     const batch = accountEntries.slice(i, i + BATCH_SIZE);
 
     const batchResults = await Promise.allSettled(
-      batch.map(async ({ tl, negAccountId }) => {
-        const negAccount = await storage.getNegativeAccount(negAccountId);
-        if (!negAccount) return 0;
-
+      batch.map(async ({ negAccount }) => {
         const detected = await detectViolations(negAccount, null);
-        let count = 0;
-        for (const v of detected) {
-          await storage.createViolation({
+        if (detected.length > 0) {
+          await storage.createViolationsBatch(detected.map(v => ({
             negativeAccountId: negAccount.id,
             violationType: v.violationType,
             severity: v.severity,
@@ -194,11 +205,10 @@ export async function runReportPipeline(
             evidenceNotes: v.evidenceNotes || null,
             confidence: v.confidence || "possible",
             croReminder: v.croReminder || null,
-          });
-          count++;
+          })));
         }
         await storage.updateWorkflowStep(negAccount.id, "scanned");
-        return count;
+        return detected.length;
       })
     );
 
@@ -211,8 +221,10 @@ export async function runReportPipeline(
       }
     }
   }
+  console.timeEnd("[pipeline] Step 8b: AI violation detection");
 
-  console.log(`[pipeline] Complete: ${parsedReport.tradelines.length} tradelines, ${parsedReport.issueFlags.length} flags, ${totalViolations} violations`);
+  const totalMs = Date.now() - pipelineStart;
+  console.log(`[pipeline] Complete: ${parsedReport.tradelines.length} tradelines, ${parsedReport.issueFlags.length} flags, ${totalViolations} violations in ${(totalMs / 1000).toFixed(1)}s`);
 
   return {
     scanId: scan.id,
@@ -517,13 +529,13 @@ export async function runStructurePipeline(
     issueFlagCount: parsedReport.issueFlags.length,
   });
 
-  // ── Step 7: Store per-tradeline evidence ───────────────────────
-  for (const tl of parsedReport.tradelines) {
+  // ── Step 7: Store per-tradeline evidence (batch insert) ───────
+  console.time("[structure-pipeline] Step 7: Tradeline evidence storage");
+  const evidenceBatch = parsedReport.tradelines.map(tl => {
     const tradelineFlags = parsedReport.issueFlags.filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
     );
-
-    await storage.createTradelineEvidence({
+    return {
       parsedReportId: parsedReportRecord.id,
       creditorName: tl.creditorName,
       accountNumberMasked: tl.accountNumberMasked || null,
@@ -531,8 +543,12 @@ export async function runStructurePipeline(
       evidenceText: tl.evidenceText || "",
       bureaus: tl.bureaus.join(", "),
       issueFlagsJson: tradelineFlags as any,
-    });
+    };
+  });
+  if (evidenceBatch.length > 0) {
+    await storage.createTradelineEvidenceBatch(evidenceBatch);
   }
+  console.timeEnd("[structure-pipeline] Step 7: Tradeline evidence storage");
 
   // ── Step 8: Pre-create NegativeAccount records from tradelines ──
   // This ensures that when the user navigates to ScanWizard, the accounts are visible
@@ -607,8 +623,9 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
   console.log(`[violation-pipeline] Running violation detection for scan ${scanId} (${negativeTradelines.length}/${parsedReport.tradelines.length} negative tradelines)`);
 
   // Step 1: Use existing NegativeAccount records if present (from structure pipeline), else create new ones
+  console.time("[violation-pipeline] Step 1: Account setup");
   const existingAccounts = await storage.getNegativeAccountsByScan(scanId);
-  const accountEntries: Array<{ tl: Tradeline; negAccountId: number }> = [];
+  const accountEntries: Array<{ tl: Tradeline; negAccount: any }> = [];
 
   for (const tl of negativeTradelines) {
     const tradelineFlags = (parsedReport.issueFlags || []).filter(f =>
@@ -624,8 +641,8 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
 
     if (existing) {
       // Update existing account with enriched rawDetails (now includes cross-bureau comparison)
-      await storage.updateNegativeAccount(existing.id, { rawDetails });
-      accountEntries.push({ tl, negAccountId: existing.id });
+      const updated = await storage.updateNegativeAccount(existing.id, { rawDetails });
+      accountEntries.push({ tl, negAccount: updated || existing });
     } else {
       const negAccount = await storage.createNegativeAccount({
         scanId,
@@ -641,12 +658,14 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
         rawDetails,
         workflowStep: "classified",
       });
-      accountEntries.push({ tl, negAccountId: negAccount.id });
+      accountEntries.push({ tl, negAccount });
     }
   }
+  console.timeEnd("[violation-pipeline] Step 1: Account setup");
 
-  // Step 2: Run AI violation detection in parallel batches of 3
-  const BATCH_SIZE = 3;
+  // Step 2: Run AI violation detection in parallel batches of 5
+  console.time("[violation-pipeline] Step 2: AI violation detection");
+  const BATCH_SIZE = 5;
   let totalViolations = 0;
   let processedCount = 0;
 
@@ -654,14 +673,10 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
     const batch = accountEntries.slice(i, i + BATCH_SIZE);
 
     const batchResults = await Promise.allSettled(
-      batch.map(async ({ tl, negAccountId }) => {
-        const negAccount = await storage.getNegativeAccount(negAccountId);
-        if (!negAccount) return 0;
-
+      batch.map(async ({ negAccount }) => {
         const detected = await detectViolations(negAccount, scan.clientState || null);
-        let count = 0;
-        for (const v of detected) {
-          await storage.createViolation({
+        if (detected.length > 0) {
+          await storage.createViolationsBatch(detected.map(v => ({
             negativeAccountId: negAccount.id,
             violationType: v.violationType,
             severity: v.severity,
@@ -675,11 +690,10 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
             evidenceNotes: v.evidenceNotes || null,
             confidence: v.confidence || "possible",
             croReminder: v.croReminder || null,
-          });
-          count++;
+          })));
         }
         await storage.updateWorkflowStep(negAccount.id, "scanned");
-        return count;
+        return detected.length;
       })
     );
 
@@ -695,6 +709,7 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
 
     console.log(`[violation-pipeline] Progress: ${processedCount}/${accountEntries.length} accounts processed`);
   }
+  console.timeEnd("[violation-pipeline] Step 2: AI violation detection");
 
   // Update scan step to indicate violations are done (step 6 = Complete)
   await storage.updateScanStep(scanId, 6);
@@ -827,12 +842,13 @@ export async function runManualEntryPipeline(scanId: number): Promise<PipelineRe
     issueFlagCount: parsedReport.issueFlags.length,
   });
 
-  // ── Step 6: Store per-tradeline evidence ──
-  for (const tl of tradelines) {
+  // ── Step 6: Store per-tradeline evidence (batch insert) ──
+  console.time("[manual-pipeline] Step 6: Tradeline evidence storage");
+  const evidenceBatch = tradelines.map(tl => {
     const tradelineFlags = parsedReport.issueFlags.filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
     );
-    await storage.createTradelineEvidence({
+    return {
       parsedReportId: parsedReportRecord.id,
       creditorName: tl.creditorName,
       accountNumberMasked: tl.accountNumberMasked || null,
@@ -840,62 +856,49 @@ export async function runManualEntryPipeline(scanId: number): Promise<PipelineRe
       evidenceText: tl.evidenceText || "",
       bureaus: tl.bureaus.join(", "),
       issueFlagsJson: tradelineFlags as any,
-    });
+    };
+  });
+  if (evidenceBatch.length > 0) {
+    await storage.createTradelineEvidenceBatch(evidenceBatch);
   }
+  console.timeEnd("[manual-pipeline] Step 6: Tradeline evidence storage");
 
-  // ── Step 7: Run AI violation detection on each account ──
+  // ── Step 7: Run AI violation detection in parallel batches ──
+  console.time("[manual-pipeline] Step 7: AI violation detection");
   let totalViolations = 0;
   const clientState = scan.clientState || null;
 
+  // Enrich all accounts with flag info first
+  const enrichedAccounts: any[] = [];
   for (const acct of negAccounts) {
-    // Enrich rawDetails with issue flag info
     const tl = tradelines.find(t => t.creditorName === acct.creditor);
     const tradelineFlags = tl ? parsedReport.issueFlags.filter(f =>
       f.creditorName.toLowerCase() === tl.creditorName.toLowerCase()
     ) : [];
 
+    let accountForDetection = acct;
     if (tradelineFlags.length > 0) {
       const flagLines = tradelineFlags.map(f =>
         `[${f.severity.toUpperCase()}] ${f.flagType}: ${f.description}`
       ).join("\n");
       const enrichedRawDetails = (acct.rawDetails || "") + `\n\nRule-Based Flags:\n${flagLines}`;
-      await storage.updateNegativeAccount(acct.id, { rawDetails: enrichedRawDetails });
-      // Re-fetch the updated account for violation detection
-      const updated = await storage.getNegativeAccount(acct.id);
-      if (updated) {
+      const updated = await storage.updateNegativeAccount(acct.id, { rawDetails: enrichedRawDetails });
+      if (updated) accountForDetection = updated;
+    }
+    enrichedAccounts.push(accountForDetection);
+  }
+
+  // Run violation detection in parallel batches of 5
+  const MANUAL_BATCH_SIZE = 5;
+  for (let i = 0; i < enrichedAccounts.length; i += MANUAL_BATCH_SIZE) {
+    const batch = enrichedAccounts.slice(i, i + MANUAL_BATCH_SIZE);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async (acct: any) => {
         await storage.clearViolationsByAccount(acct.id);
-        try {
-          const detected = await detectViolations(updated, clientState);
-          for (const v of detected) {
-            await storage.createViolation({
-              negativeAccountId: acct.id,
-              violationType: v.violationType,
-              severity: v.severity,
-              explanation: v.explanation,
-              fcraStatute: v.fcraStatute,
-              evidence: v.evidence || null,
-              matchedRule: v.matchedRule || null,
-              category: v.category || "FCRA_REPORTING",
-              evidenceRequired: v.evidenceRequired || null,
-              evidenceProvided: v.evidenceProvided || false,
-              evidenceNotes: v.evidenceNotes || null,
-              confidence: v.confidence || "possible",
-              croReminder: v.croReminder || null,
-            });
-            totalViolations++;
-          }
-          await storage.updateWorkflowStep(acct.id, "scanned");
-        } catch (err) {
-          console.error(`[manual-pipeline] Violation scan failed for ${acct.creditor}:`, err);
-        }
-      }
-    } else {
-      // No flags but still run AI analysis
-      await storage.clearViolationsByAccount(acct.id);
-      try {
         const detected = await detectViolations(acct, clientState);
-        for (const v of detected) {
-          await storage.createViolation({
+        if (detected.length > 0) {
+          await storage.createViolationsBatch(detected.map(v => ({
             negativeAccountId: acct.id,
             violationType: v.violationType,
             severity: v.severity,
@@ -909,15 +912,23 @@ export async function runManualEntryPipeline(scanId: number): Promise<PipelineRe
             evidenceNotes: v.evidenceNotes || null,
             confidence: v.confidence || "possible",
             croReminder: v.croReminder || null,
-          });
-          totalViolations++;
+          })));
         }
         await storage.updateWorkflowStep(acct.id, "scanned");
-      } catch (err) {
-        console.error(`[manual-pipeline] Violation scan failed for ${acct.creditor}:`, err);
+        return detected.length;
+      })
+    );
+
+    for (let j = 0; j < batchResults.length; j++) {
+      const result = batchResults[j];
+      if (result.status === "fulfilled") {
+        totalViolations += result.value;
+      } else {
+        console.error(`[manual-pipeline] Violation scan failed for ${batch[j].creditor}:`, result.reason?.message || result.reason);
       }
     }
   }
+  console.timeEnd("[manual-pipeline] Step 7: AI violation detection");
 
   // Update scan status — manual pipeline completes all steps
   await storage.updateScanStatus(scanId, "completed" as any);
