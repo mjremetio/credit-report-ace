@@ -189,6 +189,8 @@ export async function runReportPipeline(
 
     const batchResults = await Promise.allSettled(
       batch.map(async ({ negAccount }) => {
+        // Clear any existing violations before detecting to prevent accumulation on re-scans
+        await storage.clearViolationsByAccount(negAccount.id);
         const detected = await detectViolations(negAccount, null);
         if (detected.length > 0) {
           await storage.createViolationsBatch(detected.map(v => ({
@@ -674,6 +676,8 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
 
     const batchResults = await Promise.allSettled(
       batch.map(async ({ negAccount }) => {
+        // Clear any existing violations before re-detecting to prevent accumulation on re-scans
+        await storage.clearViolationsByAccount(negAccount.id);
         const detected = await detectViolations(negAccount, scan.clientState || null);
         if (detected.length > 0) {
           await storage.createViolationsBatch(detected.map(v => ({

@@ -569,13 +569,15 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
     if (!tradelineMap.has(key)) {
       tradelineMap.set(key, t);
     } else {
-      // Merge bureau details from duplicate
+      // Merge bureau details from duplicate, deduplicating by bureau name
       const existing = tradelineMap.get(key)!;
       if (t.bureauDetails) {
-        existing.bureauDetails = [...(existing.bureauDetails || []), ...t.bureauDetails];
+        const existingBureaus = new Set((existing.bureauDetails || []).map(bd => bd.bureau?.toLowerCase()));
+        const newDetails = t.bureauDetails.filter(bd => !existingBureaus.has(bd.bureau?.toLowerCase()));
+        existing.bureauDetails = [...(existing.bureauDetails || []), ...newDetails];
       }
       if (t.remarks) {
-        existing.remarks = Array.from(new Set([...(existing.remarks || []), ...t.remarks]));
+        existing.remarks = Array.from(new Set([...(existing.remarks || []), ...t.remarks])).sort();
       }
     }
   }
@@ -706,7 +708,7 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
       bureaus,
       bureauDetails: uniqueBureauDetails,
       dates,
-      remarks: Array.from(allRemarks),
+      remarks: Array.from(allRemarks).sort(),
       evidenceText: t.evidenceText,
     };
   });
