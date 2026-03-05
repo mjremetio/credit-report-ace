@@ -149,7 +149,13 @@ export async function registerRoutes(
         })
       );
       const parsedReport = await storage.getParsedReportByScan(id);
-      res.json({ ...scan, negativeAccounts: accountsWithDetails, hasParsedReport: !!parsedReport });
+      res.json({
+        ...scan,
+        negativeAccounts: accountsWithDetails,
+        hasParsedReport: !!parsedReport,
+        tradelineCount: parsedReport?.tradelineCount || 0,
+        issueFlagCount: parsedReport?.issueFlagCount || 0,
+      });
     } catch (error) {
       console.error("Error fetching scan:", error);
       res.status(500).json({ error: "Failed to fetch scan" });

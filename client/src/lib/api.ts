@@ -404,6 +404,12 @@ export async function exportJson(scanId: number, includeRejected = false) {
   return res.json();
 }
 
+export async function fetchOrganizedReport(scanId: number) {
+  const res = await fetch(`/api/scans/${scanId}/organized-report`);
+  if (!res.ok) throw new Error("Failed to fetch organized report");
+  return res.json();
+}
+
 export async function updateReportMetadata(scanId: number, data: {
   reportTitle?: string | null;
   clientName?: string | null;
