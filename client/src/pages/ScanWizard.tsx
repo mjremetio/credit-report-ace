@@ -66,13 +66,15 @@ export default function ScanWizard() {
   const rawStep = scan?.currentStep || 1;
   const step = isUploadBased ? Math.max(rawStep, 4) : rawStep;
 
-  // For upload-based scans, compute which upload step is active based on account state
+  // For upload-based scans, use persisted currentStep from DB (checkpointed by server pipelines)
+  // Fallback: infer from account scan state if DB step seems stale
   const negAccounts = scan?.negativeAccounts || [];
   const allScanned = negAccounts.length > 0 && negAccounts.every((a: any) => a.workflowStep === "scanned");
   const hasViolations = negAccounts.some((a: any) => a.violations?.length > 0);
-  // Upload-based scans: steps 1-4 are already done (upload, review text, structuring, review data).
-  // Step 5 = Violation Analysis (current until all accounts scanned), Step 6 = Complete.
-  const uploadActiveStep = allScanned || hasViolations ? 6 : 5;
+  // Steps: 1-3=upload/review/structuring (done), 4=review data, 5=violation analysis, 6=complete
+  const inferredStep = allScanned || hasViolations ? 6 : 5;
+  // Use the higher of DB-persisted step or inferred step (covers cases where DB is behind)
+  const uploadActiveStep = isUploadBased ? Math.max(rawStep, inferredStep >= 6 ? 6 : 5) : 5;
 
   const goToStep = (s: number) => {
     if (s >= 1 && s <= 4) {

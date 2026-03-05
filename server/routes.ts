@@ -417,6 +417,9 @@ export async function registerRoutes(
       const scan = await storage.getScan(scanId);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
 
+      // Checkpoint: Mark step 5 (Violation Analysis in progress)
+      await storage.updateScanStep(scanId, 5);
+
       const result = await runViolationPipeline(scanId);
 
       res.json({
