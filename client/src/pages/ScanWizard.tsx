@@ -980,12 +980,33 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               <div className="space-y-2">
                 {organizedReport.publicInformation.map((pr: any, i: number) => (
                   <div key={i} className="bg-background/30 border border-border rounded-lg p-3 text-xs font-mono">
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center mb-2">
                       <span className="text-foreground font-medium">{pr.type}</span>
-                      <span className="text-muted-foreground">{pr.bureaus?.join(", ")}</span>
                     </div>
-                    {pr.court && <p className="text-muted-foreground mt-1">Court: {pr.court}</p>}
-                    {pr.dateFiled && <p className="text-muted-foreground">Filed: {pr.dateFiled}</p>}
+                    <div className="flex gap-2 mb-2">
+                      {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
+                        const isReported = pr.bureaus?.includes(bureau);
+                        return (
+                          <div key={bureau} className={`px-2 py-1 rounded text-[10px] border ${isReported ? "bg-primary/10 text-primary border-primary/30" : "bg-secondary text-muted-foreground/40 border-border"}`}>
+                            {bureau}: {isReported ? "Reported" : "Not Reported"}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted-foreground">
+                      {pr.court && <p>Court: {pr.court}</p>}
+                      {pr.caseNumber && <p>Case #: {pr.caseNumber}</p>}
+                      {pr.dateFiled && <p>Filed: {pr.dateFiled}</p>}
+                      {pr.dateDischarged && <p>Discharged: {pr.dateDischarged}</p>}
+                      {pr.amount != null && <p>Amount: ${pr.amount?.toLocaleString()}</p>}
+                    </div>
+                    {pr.remarks?.length > 0 && (
+                      <div className="mt-1">
+                        {pr.remarks.map((r: string, ri: number) => (
+                          <p key={ri} className="text-[10px] text-muted-foreground">- {r}</p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1002,21 +1023,34 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             onToggle={() => toggleSection("inquiries")}
           >
             {organizedReport.inquiries?.length > 0 ? (
-              <div className="space-y-1 max-h-64 overflow-y-auto">
-                {organizedReport.inquiries.map((inq: any, i: number) => (
-                  <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono flex items-center justify-between">
-                    <span className="text-foreground">{inq.creditorName}</span>
-                    <div className="flex items-center gap-3">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                        inq.type === "hard"
-                          ? "bg-destructive/10 text-destructive border border-destructive/30"
-                          : "bg-secondary text-muted-foreground border border-border"
-                      }`}>{inq.type}</span>
-                      <span className="text-muted-foreground">{inq.bureau}</span>
-                      <span className="text-muted-foreground">{inq.date}</span>
+              <div className="space-y-3 max-h-80 overflow-y-auto">
+                {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
+                  const bureauInquiries = organizedReport.inquiries.filter((inq: any) => inq.bureau === bureau);
+                  if (bureauInquiries.length === 0) return null;
+                  return (
+                    <div key={bureau}>
+                      <p className="text-[10px] font-mono text-primary font-medium mb-1">{bureau} ({bureauInquiries.length})</p>
+                      <div className="space-y-1">
+                        {bureauInquiries.map((inq: any, i: number) => (
+                          <div key={i} className="bg-background/30 rounded px-3 py-2 text-xs font-mono flex items-center justify-between">
+                            <span className="text-foreground">{inq.creditorName}</span>
+                            <div className="flex items-center gap-3">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                inq.type === "hard"
+                                  ? "bg-destructive/10 text-destructive border border-destructive/30"
+                                  : "bg-secondary text-muted-foreground border border-border"
+                              }`}>{inq.type}</span>
+                              <span className="text-muted-foreground">{inq.date}</span>
+                              {inq.permissiblePurpose && (
+                                <span className="text-muted-foreground text-[10px]">{inq.permissiblePurpose}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-xs font-mono text-muted-foreground">No inquiries found.</p>

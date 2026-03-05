@@ -121,6 +121,7 @@ For EACH account, return per-bureau details separately. Return JSON:
           "pastDueAmount": 0,
           "terms": "Revolving",
           "paymentHistory": [{ "month": "2025-12", "code": "C" }, { "month": "2025-11", "code": "C" }],
+          "daysLate7Year": { "30": 0, "60": 0, "90": 0 },
           "remarks": ["Account in good standing"]
         }
       ],
@@ -138,6 +139,8 @@ For EACH account, return per-bureau details separately. Return JSON:
 
 IMPORTANT:
 - Extract payment history grids as month/code pairs (C=Current, 30/60/90/120=Late days, CO=Charge-off, CL=Collection, BK=Bankruptcy)
+- Extract the "Days Late - 7 Year History" counts per bureau as daysLate7Year: { "30": count, "60": count, "90": count }
+  This section shows how many times the account was 30, 60, or 90 days late over the 7-year reporting window, per bureau.
 - Extract ALL remarks/comments — especially bankruptcy, dispute, and collection remarks
 - If the same account shows different values across bureaus, record each bureau's value separately`;
 
@@ -602,6 +605,11 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
           month: ph.month,
           code: ph.code,
         })),
+        daysLate7Year: bd.daysLate7Year ? {
+          "30": bd.daysLate7Year["30"] || 0,
+          "60": bd.daysLate7Year["60"] || 0,
+          "90": bd.daysLate7Year["90"] || 0,
+        } : undefined,
         remarks: bd.remarks || [],
       });
       return acc;
