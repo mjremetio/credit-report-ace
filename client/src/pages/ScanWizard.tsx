@@ -5,18 +5,25 @@ import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
   Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
-  MapPin, Download, ClipboardCheck, Activity
+  MapPin, Download, ClipboardCheck, Activity, UploadCloud, Database
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
   deleteNegativeAccount, scanAccountForViolations, runManualAnalysisPipeline
 } from "@/lib/api";
 
-const STEPS = [
+const MANUAL_STEPS = [
   { num: 1, label: "Start", icon: Shield },
   { num: 2, label: "Add Accounts", icon: Plus },
   { num: 3, label: "Classify", icon: ClipboardList },
   { num: 4, label: "Next Steps", icon: CheckCircle2 },
+];
+
+const UPLOAD_STEPS = [
+  { num: 1, label: "Uploaded", icon: UploadCloud },
+  { num: 2, label: "Structured", icon: Database },
+  { num: 3, label: "Analysis", icon: Zap },
+  { num: 4, label: "Review", icon: ClipboardCheck },
 ];
 
 const ACCOUNT_TYPES = [
@@ -55,6 +62,12 @@ export default function ScanWizard() {
   const isUploadBased = scan?.hasParsedReport || false;
   const rawStep = scan?.currentStep || 1;
   const step = isUploadBased ? Math.max(rawStep, 4) : rawStep;
+
+  // For upload-based scans, compute which upload step is active based on account state
+  const negAccounts = scan?.negativeAccounts || [];
+  const allScanned = negAccounts.length > 0 && negAccounts.every((a: any) => a.workflowStep === "scanned");
+  const hasViolations = negAccounts.some((a: any) => a.violations?.length > 0);
+  const uploadActiveStep = allScanned || hasViolations ? 4 : 3;
 
   const goToStep = (s: number) => {
     if (s >= 1 && s <= 4) {
@@ -98,28 +111,31 @@ export default function ScanWizard() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {STEPS.map((s, i) => {
-            // For upload-based scans, all manual entry steps (1-3) are effectively complete
-            const isCompleted = isUploadBased ? (s.num <= 4) : (s.num < step);
-            const isCurrent = s.num === step;
+          {(isUploadBased ? UPLOAD_STEPS : MANUAL_STEPS).map((s, i, arr) => {
+            const isCompleted = isUploadBased
+              ? s.num < uploadActiveStep
+              : s.num < step;
+            const isCurrent = isUploadBased
+              ? s.num === uploadActiveStep
+              : s.num === step;
             return (
               <div key={s.num} className="flex items-center">
                 <button
                   data-testid={`step-indicator-${s.num}`}
                   onClick={() => !isUploadBased && goToStep(s.num)}
-                  disabled={isUploadBased && s.num < 4}
+                  disabled={isUploadBased}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all ${
                     isCurrent
                       ? "bg-primary text-primary-foreground"
                       : isCompleted
                       ? "bg-primary/20 text-primary"
                       : "bg-secondary text-muted-foreground"
-                  } ${isUploadBased && s.num < 4 ? "opacity-50 cursor-not-allowed" : ""}`}
+                  } ${isUploadBased ? "cursor-default" : ""}`}
                 >
-                  <s.icon className="w-3.5 h-3.5" />
+                  {isCompleted ? <CheckCircle2 className="w-3.5 h-3.5" /> : <s.icon className="w-3.5 h-3.5" />}
                   <span className="hidden md:inline">{s.label}</span>
                 </button>
-                {i < STEPS.length - 1 && (
+                {i < arr.length - 1 && (
                   <div className={`w-6 h-0.5 mx-1 ${isCompleted || isCurrent ? "bg-primary" : "bg-border"}`} />
                 )}
               </div>
@@ -620,7 +636,9 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
       {/* Dispute Scanner Progress */}
       <div className="mb-6 bg-card border border-border rounded-xl p-5">
-        <h4 className="font-display text-foreground text-sm mb-3">Dispute Scanner</h4>
+        <h4 className="font-display text-foreground text-sm mb-3">
+          {hasParsedReport ? "Upload Progress" : "Dispute Scanner"}
+        </h4>
         <div className="space-y-2 text-xs font-mono">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
@@ -636,11 +654,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             ) : pipelineRunning ? (
               <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
             ) : (
-              <Activity className="w-4 h-4 text-primary flex-shrink-0" />
+              <Zap className="w-4 h-4 text-primary flex-shrink-0" />
             )}
-            <span className={analysisComplete ? "text-muted-foreground" : "text-primary"}>
-              {hasParsedReport ? "Structured JSON & AI violation analysis" : "Convert into Structured JSON & AI violation analysis"}
-              {analysisComplete && totalViolationCount > 0 ? ` — ${totalViolationCount} violation(s) found` : ""}
+            <span className={analysisComplete ? "text-muted-foreground" : "text-primary font-semibold"}>
+              {analysisComplete
+                ? `AI violation analysis complete — ${totalViolationCount} violation(s) found`
+                : hasParsedReport
+                ? `Run AI violation analysis — ${unscannedCount} account(s) pending`
+                : "Convert into Structured JSON & AI violation analysis"}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -710,6 +731,8 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <p className="text-muted-foreground font-mono text-sm">
             {analysisComplete
               ? "Analysis complete. Review violations below, then proceed to paralegal review."
+              : hasParsedReport
+              ? "Report has been uploaded and structured. Run AI violation analysis to scan for FCRA & FDCPA violations."
               : "Convert manual entries to structured JSON and run AI violation analysis, or scan individual accounts."}
           </p>
         </div>
