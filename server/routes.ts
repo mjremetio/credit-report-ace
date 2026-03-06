@@ -69,6 +69,22 @@ const reviewViolationSchema = z.object({
   paralegalNotes: z.string().optional().nullable(),
 });
 
+const createManualViolationSchema = z.object({
+  negativeAccountId: z.number().int().positive("negativeAccountId is required"),
+  violationType: z.string().min(1, "violationType is required"),
+  severity: z.enum(["critical", "high", "medium", "low"]),
+  explanation: z.string().min(1, "explanation is required"),
+  fcraStatute: z.string().min(1, "fcraStatute is required"),
+  evidence: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
+  evidenceRequired: z.string().optional().nullable(),
+  evidenceProvided: z.boolean().optional(),
+  evidenceNotes: z.string().optional().nullable(),
+  confidence: z.enum(["confirmed", "likely", "possible"]).optional(),
+  croReminder: z.string().optional().nullable(),
+  paralegalNotes: z.string().optional().nullable(),
+});
+
 const approveScanSchema = z.object({
   reviewedBy: z.string().min(1, "reviewedBy is required"),
   reviewNotes: z.string().optional().nullable(),
@@ -672,6 +688,47 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error editing violation:", error);
       res.status(500).json({ error: "Failed to edit violation" });
+    }
+  });
+
+  // POST /api/violations/manual — Create a violation manually
+  app.post("/api/violations/manual", async (req, res) => {
+    try {
+      const parsed = createManualViolationSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid input" });
+
+      const account = await storage.getNegativeAccount(parsed.data.negativeAccountId);
+      if (!account) return res.status(404).json({ error: "Negative account not found" });
+
+      const violation = await storage.createViolation({
+        negativeAccountId: parsed.data.negativeAccountId,
+        violationType: parsed.data.violationType,
+        severity: parsed.data.severity,
+        explanation: parsed.data.explanation,
+        fcraStatute: parsed.data.fcraStatute,
+        evidence: parsed.data.evidence || null,
+        matchedRule: "manual_entry",
+        category: parsed.data.category || "FCRA_REPORTING",
+        evidenceRequired: parsed.data.evidenceRequired || null,
+        evidenceProvided: parsed.data.evidenceProvided || false,
+        evidenceNotes: parsed.data.evidenceNotes || null,
+        confidence: parsed.data.confidence || "confirmed",
+        croReminder: parsed.data.croReminder || null,
+        reviewStatus: "confirmed",
+        reviewedAt: new Date(),
+        paralegalNotes: parsed.data.paralegalNotes || null,
+      });
+
+      // Auto-set review status to in_progress when violations are added
+      const scan = await storage.getScan(account.scanId);
+      if (scan && (!scan.reviewStatus || scan.reviewStatus === "pending")) {
+        await storage.updateScan(account.scanId, { reviewStatus: "in_progress" });
+      }
+
+      res.json(violation);
+    } catch (error) {
+      console.error("Error creating manual violation:", error);
+      res.status(500).json({ error: "Failed to create violation" });
     }
   });
 
