@@ -29,12 +29,13 @@ export interface DetectedViolation {
 const VIOLATION_SYSTEM_PROMPT = `You are LEXA, an expert FCRA (Fair Credit Reporting Act) violation detection agent. You analyze individual credit account details provided by a consumer and identify potential reporting violations.
 
 ## INPUT FORMAT:
-You will receive a STRUCTURED account description containing:
-- **Header Section**: Creditor name, account type, account number, original creditor, aggregate balance/status/dates, reporting bureaus
-- **Per-Bureau Detail Blocks**: Each bureau's reported data (balance, status, dates, high balance, credit limit, payment status, account rating, creditor type, past due, terms, remarks, and 24-month payment history grid)
-- **Cross-Bureau Comparison Summary**: Pre-computed differences across bureaus for quick reference
-- **Rule-Based Flags**: Deterministic issues already detected by our rule engine
-- **Client State**: If provided, enables state-specific violations (e.g., CA license requirements)
+You will receive account data as a JSON object with these keys:
+- **account**: Creditor name, account type, account number, original creditor, aggregate balance/status/dates, reporting bureaus
+- **bureauDetails**: Array of per-bureau data objects (balance, status, dates, highBalance, creditLimit, paymentStatus, accountRating, creditorType, pastDueAmount, terms, remarks, paymentHistory as "YYYY-MM:code" strings, daysLate7Year counts)
+- **crossBureauDiffs** (optional): Pre-computed discrepancies across bureaus — each has a field name and per-bureau values
+- **ruleBasedFlags** (optional): Deterministic issues already detected by our rule engine — each has type, severity, description, evidence
+- **clientState** (optional): Consumer's state for state-specific violations (e.g., CA license requirements)
+- **debtCollectorContext** (optional): Present for collection accounts — lists FDCPA investigation requirements
 
 ## ACCOUNT TYPES YOU HANDLE:
 - **Debt Collection**: Accounts sold to or handled by collection agencies
@@ -228,8 +229,11 @@ For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector
  */
 const VIOLATION_COMPACT_PROMPT = `You are LEXA, an expert FCRA/FDCPA violation detection agent. You analyze credit accounts that have ALREADY been processed by a deterministic rule engine.
 
+## INPUT FORMAT:
+Account data is provided as JSON with keys: account, bureauDetails, crossBureauDiffs, ruleBasedFlags, clientState, debtCollectorContext.
+
 ## YOUR ROLE:
-The account data includes pre-computed "Rule-Based Flags" from our rule engine. Your job is to:
+The account data includes pre-computed "ruleBasedFlags" from our rule engine. Your job is to:
 1. **Expand on existing flags** — add legal context, FCRA statute references, evidence details, and dispute strategy
 2. **Find nuanced patterns** the rule engine cannot detect — legal interpretation, combined flag implications, timing patterns
 3. **Analyze FDCPA debt collector violations** — mini-Miranda disclosure, cease contact, third-party disclosure, harassment, CA license (if applicable)
@@ -278,7 +282,10 @@ export async function detectViolations(account: NegativeAccount, clientState?: s
   const accountDetails = buildAccountDescription(account, clientState);
 
   // Use compact prompt when rule-based flags are already present (saves ~40% tokens)
-  const hasRuleFlags = account.rawDetails?.includes("RULE-BASED FLAGS") || account.rawDetails?.includes("Rule-Based Flags:");
+  // Check both JSON format (new) and text format (legacy)
+  const hasRuleFlags = account.rawDetails?.includes('"ruleBasedFlags"') ||
+    account.rawDetails?.includes("RULE-BASED FLAGS") ||
+    account.rawDetails?.includes("Rule-Based Flags:");
   let systemPrompt = hasRuleFlags ? VIOLATION_COMPACT_PROMPT : VIOLATION_SYSTEM_PROMPT;
 
   // Inject learned violation patterns to enhance scanning accuracy
@@ -344,9 +351,49 @@ Use these patterns to:
 }
 
 function buildAccountDescription(account: NegativeAccount, clientState?: string | null): string {
+  // Check if rawDetails is already JSON (new pipeline format)
+  let parsedRawDetails: Record<string, unknown> | null = null;
+  if (account.rawDetails) {
+    try {
+      const parsed = JSON.parse(account.rawDetails);
+      if (parsed && typeof parsed === "object" && parsed.account) {
+        parsedRawDetails = parsed;
+      }
+    } catch {
+      // Not JSON — legacy text format
+    }
+  }
+
+  if (parsedRawDetails) {
+    // New JSON format: merge account header fields and pass through
+    const payload: Record<string, unknown> = { ...parsedRawDetails };
+
+    // Add client state if provided
+    if (clientState) {
+      (payload.account as Record<string, unknown>).clientState = clientState;
+    }
+
+    // Add debt collector context for collection accounts
+    if (account.accountType === "debt_collection") {
+      const dcContext: string[] = [
+        "Verify all written communications include mini-Miranda disclosure",
+        "Check if client sent written cease/stop contact request",
+        "Check if collector contacted third parties (spouse, family, employer, friends)",
+        "Check call frequency for harassment (7+ calls/7 days or 3+/day)",
+        "Check call timing (before 8AM/after 9PM) and workplace calls",
+      ];
+      if (clientState?.toUpperCase() === "CA") {
+        dcContext.splice(1, 0, "CALIFORNIA: ALL correspondence must include CA debt collector license number");
+      }
+      payload.debtCollectorContext = dcContext;
+    }
+
+    return JSON.stringify(payload);
+  }
+
+  // Legacy text format fallback for manually-entered accounts or old data
   const lines: string[] = [];
 
-  // ── Header Section ──
   lines.push("═══ ACCOUNT HEADER ═══");
   lines.push(`Creditor: ${account.creditor}`);
   lines.push(`Account Type: ${formatAccountType(account.accountType)}`);
@@ -359,7 +406,6 @@ function buildAccountDescription(account: NegativeAccount, clientState?: string 
   if (account.bureaus) lines.push(`Reporting Bureaus: ${account.bureaus}`);
   if (clientState) lines.push(`Client State: ${clientState}`);
 
-  // ── Debt Collector Context ──
   if (account.accountType === "debt_collection") {
     lines.push("");
     lines.push("═══ DEBT COLLECTOR ANALYSIS CONTEXT ═══");
@@ -374,31 +420,10 @@ function buildAccountDescription(account: NegativeAccount, clientState?: string 
     lines.push(`${clientState?.toUpperCase() === "CA" ? "6" : "5"}. Check call timing (before 8AM/after 9PM) and workplace calls`);
   }
 
-  // ── Parse rawDetails for structured per-bureau data ──
-  // The rawDetails field contains rich per-bureau information built by buildTradelineRawDetails()
   if (account.rawDetails) {
-    // Check if rawDetails already has structured format (from pipeline)
-    const hasPerBureauData = account.rawDetails.includes("PER-BUREAU DETAILS") || account.rawDetails.includes("Per-Bureau Details:");
-    const hasRuleFlags = account.rawDetails.includes("RULE-BASED FLAGS") || account.rawDetails.includes("Rule-Based Flags:");
-
-    if (hasPerBureauData) {
-      // rawDetails is already well-structured from pipeline — pass it directly
-      lines.push("");
-      lines.push("═══ STRUCTURED ACCOUNT DATA ═══");
-      lines.push(account.rawDetails);
-    } else {
-      // Raw/manual entry — wrap it clearly
-      lines.push("");
-      lines.push("═══ RAW REPORT TEXT ═══");
-      lines.push(account.rawDetails);
-    }
-
-    // If no rule-based flags in rawDetails, add a note
-    if (!hasRuleFlags) {
-      lines.push("");
-      lines.push("═══ RULE-BASED FLAGS ═══");
-      lines.push("No deterministic flags computed for this account.");
-    }
+    lines.push("");
+    lines.push("═══ RAW REPORT TEXT ═══");
+    lines.push(account.rawDetails);
   }
 
   return lines.join("\n");
