@@ -703,7 +703,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                 {
                   label: analysisComplete
                     ? `Violation Analysis — ${totalViolationCount} violation(s) found`
-                    : `Violation Analysis — ${unscannedCount} account(s) pending`,
+                    : `Violation Analysis — ${negAccounts.length} account(s) pending`,
                   done: analysisComplete,
                   current: !analysisComplete,
                 },
@@ -1184,7 +1184,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               <span className="text-purple-600">FDCPA: {debtCollectorViolations.length}</span>
             )}
             <span className="text-muted-foreground">
-              {unscannedCount === 0 ? "All accounts scanned" : `${unscannedCount} remaining`}
+              {analysisComplete ? "All accounts analyzed" : `${negAccounts.length} pending`}
             </span>
           </div>
         </div>
