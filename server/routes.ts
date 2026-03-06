@@ -139,6 +139,7 @@ export async function registerRoutes(
   app.get("/api/scans/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid scan ID" });
       const scan = await storage.getScan(id);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
       const negAccounts = await storage.getNegativeAccountsByScan(id);
@@ -165,6 +166,7 @@ export async function registerRoutes(
   app.patch("/api/scans/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid scan ID" });
       const parsed = updateScanSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid input" });
       let scan;
@@ -183,6 +185,10 @@ export async function registerRoutes(
       if (Object.keys(extraUpdates).length > 0) {
         scan = await storage.updateScan(id, extraUpdates);
       }
+      // If no fields were updated, fetch the scan to verify it exists
+      if (!scan) {
+        scan = await storage.getScan(id);
+      }
       if (!scan) return res.status(404).json({ error: "Scan not found" });
       res.json(scan);
     } catch (error) {
@@ -194,6 +200,7 @@ export async function registerRoutes(
   app.delete("/api/scans/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid scan ID" });
       await storage.deleteScan(id);
       res.status(204).send();
     } catch (error) {
@@ -414,6 +421,7 @@ export async function registerRoutes(
   app.post("/api/scans/:scanId/run-violations", async (req, res) => {
     try {
       const scanId = parseInt(req.params.scanId);
+      if (isNaN(scanId)) return res.status(400).json({ error: "Invalid scan ID" });
       const scan = await storage.getScan(scanId);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
 
@@ -436,6 +444,7 @@ export async function registerRoutes(
   app.post("/api/scans/:scanId/accounts", async (req, res) => {
     try {
       const scanId = parseInt(req.params.scanId);
+      if (isNaN(scanId)) return res.status(400).json({ error: "Invalid scan ID" });
       const scan = await storage.getScan(scanId);
       if (!scan) return res.status(404).json({ error: "Scan not found" });
       const parsed = createNegativeAccountSchema.safeParse(req.body);
