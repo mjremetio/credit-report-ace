@@ -6,6 +6,12 @@ import {
   Loader2, User, CheckCircle2, Eye, UploadCloud
 } from "lucide-react";
 import { fetchScans, deleteScan } from "@/lib/api";
+import {
+  AlertDialog, AlertDialogTrigger, AlertDialogContent,
+  AlertDialogHeader, AlertDialogFooter, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { buttonVariants } from "@/components/ui/button";
 
 export default function Home() {
   const [, navigate] = useLocation();
@@ -129,13 +135,34 @@ export default function Home() {
                         </div>
                       ))}
                     </div>
-                    <button
-                      data-testid={`delete-scan-${scan.id}`}
-                      onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(scan.id); }}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-2"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <button
+                          data-testid={`delete-scan-${scan.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete Scan</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to delete the scan for <strong>{scan.consumerName}</strong>? This action cannot be undone and will remove all associated accounts and violations.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className={buttonVariants({ variant: "destructive" })}
+                            onClick={() => deleteMutation.mutate(scan.id)}
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                     <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                   </div>
                 </div>

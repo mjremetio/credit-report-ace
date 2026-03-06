@@ -45,7 +45,7 @@ You will receive account data as a JSON object with these keys:
 ## FCRA VIOLATION RULES TO CHECK:
 
 ### Balance Errors
-- BALANCE_PAID_NOT_ZERO: Account shows "Paid" or "Settled" but balance is not $0
+- BALANCE_PAID_NOT_ZERO: Account shows "Paid" or "Settled" but balance is not $0. Also flag: reporting discharged debts with a balance, failing to update balance after payment plan or settlement, continuing to report a balance after debt was settled or paid in full
 - BALANCE_MISMATCH_CROSS_BUREAU: Same account shows different balances across bureaus (compare per-bureau balance fields)
 - OC_AND_DEBTBUYER_BOTH_BALANCE: Original creditor AND debt buyer both report a balance
 - BALANCE_POST_BANKRUPTCY: Account in bankruptcy still shows a balance
@@ -60,7 +60,7 @@ You will receive account data as a JSON object with these keys:
 
 ### Date / Aging Issues
 - DOFD_INCONSISTENT: Date of First Delinquency doesn't match payment history timeline
-- OBSOLETE_REPORTING: Negative item older than 7 years from DOFD (10 years for bankruptcy)
+- OBSOLETE_REPORTING: Negative item older than 7 years from DOFD (10 years for chapter 7 bankruptcy). Also flag: reporting debts discharged in bankruptcy as active or with a balance, re-aging old debts by transferring to new collectors with reset dates, reporting an account as active/open when it was voluntarily closed by the consumer, reporting lawsuits or judgments older than 7 years
 - REAGING_DETECTED: DOFD changed to extend reporting window (check if date opened differs across bureaus but DOFD is the same)
 - DATE_OPENED_MISMATCH: Date opened differs across bureaus — indicates furnisher reporting inconsistency
 - LAST_PAYMENT_AFTER_CHARGEOFF: Last payment date is after the charge-off or collection date
@@ -68,7 +68,8 @@ You will receive account data as a JSON object with these keys:
 
 ### Duplicate / Mixed File
 - DUPLICATE_TRADELINE_SAME_CREDITOR: Same debt appears twice (OC + collector both reporting with balances)
-- AUTH_USER_AS_PRIMARY: Authorized user reporting as primary
+- AUTH_USER_AS_PRIMARY: Authorized user reporting as primary. Also flag: listing consumer as debtor on account when they were only an authorized user
+- MIXED_FILE_INDICATORS: Credit bureau may have mixed consumer's file with another person. Check for: accounts that may belong to someone with a similar Social Security number, accounts from persons with similar names (Jr./Sr./III confusion), accounts from persons with same last name and similar first names, accounts from persons with similar names in the same city or zip code. Mixed files cause morphing or duplicating of negative credit information with a stranger
 
 ### Payment History Issues
 - PAYMENT_GRID_INCONSISTENT_WITH_STATUS: Payment grid shows current but status says derogatory (or vice versa)
@@ -81,7 +82,7 @@ You will receive account data as a JSON object with these keys:
 
 ### Collection-Specific Issues
 - MISSING_ORIGINAL_CREDITOR: Collection account doesn't identify original creditor
-- NO_VALIDATION_NOTICE: No evidence of proper debt validation
+- NO_VALIDATION_NOTICE: No evidence of proper debt validation. Also flag: creditor/CRA failed to investigate dispute within 30 days (or 45 days with consumer documentation), CRA failed to notify furnisher of dispute, CRA/furnisher failed to correct or delete inaccurate/incomplete/unverifiable information after investigation, furnisher failed to provide address for written disputes, furnisher failed to inform consumer of investigation results within 5 business days of completion
 - INCORRECT_BALANCE_WITH_FEES: Balance includes unauthorized fees or interest (balance > high balance on collection)
 
 ### Charge-Off Specific
@@ -91,6 +92,23 @@ You will receive account data as a JSON object with these keys:
 ### Repossession Specific
 - DEFICIENCY_BALANCE_WITHOUT_NOTICE: Deficiency balance without proper notice
 - IMPROPER_SALE_PROCEEDS: Sale proceeds not properly credited
+
+### Privacy Violations (§1681b, §1681e)
+- UNAUTHORIZED_REPORT_RELEASE: Credit report furnished to unauthorized person or entity without permissible purpose. CRAs can only release reports to authorized persons: creditors, landlords, insurance providers, utility companies, and employers (only with prior written consumer consent)
+- EMPLOYER_REPORT_WITHOUT_CONSENT: Employment-related credit check performed without written consumer consent (§1681b(f))
+- REPORT_SHARED_WITH_THIRD_PARTY: Credit information shared beyond the requesting party without authorization
+
+### Impermissible Purpose (§1681b)
+- NO_PERMISSIBLE_PURPOSE: Credit report pulled without a valid permissible purpose (credit transaction, employment, insurance, legitimate business need). Examples: pulling report to determine collectibility before filing a non-credit lawsuit, creditor on discharged bankruptcy debt pulling report to monitor current financial activity
+- STALE_INQUIRY_NO_TRANSACTION: Hard inquiry on report with no corresponding account or credit transaction — may indicate impermissible pull
+
+### Withholding Required Notices (§1681m, §1681j, §1681g)
+- NO_ADVERSE_ACTION_NOTICE: Creditor or user of credit information failed to notify consumer of adverse action (denial, rate increase, etc.) taken based on credit report (§1681m(a))
+- NO_NEGATIVE_INFO_NOTICE: Furnisher failed to notify consumer before or within 30 days of first reporting negative information to a CRA
+- CREDIT_SCORE_NOT_PROVIDED: Creditor used credit score in credit decision but failed to provide the score and key factors to the consumer (§1681m(h))
+- NO_DISPUTE_RIGHTS_NOTICE: Consumer not informed of their right to dispute inaccurate credit information or right to obtain a free credit report after adverse action (§1681j(a))
+- NO_FREE_REPORT_NOTICE: User of credit information failed to inform consumer of right to obtain a free annual credit report after adverse action
+- SOURCE_NOT_IDENTIFIED: Creditor or user of information refused to identify the source of the credit information obtained about the consumer (§1681g)
 
 ### Creditor Type / Classification Issues
 - CREDITOR_TYPE_MISMATCH_CROSS_BUREAU: Creditor type differs across bureaus (e.g., "Collection Agency" vs "Bank")
@@ -105,6 +123,10 @@ You will receive account data as a JSON object with these keys:
 - §1681s-2(a)(5): False Date of First Delinquency
 - §1681s-2(b): Furnisher Failure After CRA Dispute
 - §1681g: Failure to Disclose Required Information
+- §1681b(f): Consumer Consent Required for Employment Purposes
+- §1681m(a): Adverse Action Notice Requirements
+- §1681m(h): Credit Score Disclosure for Risk-Based Pricing
+- §1681j(a): Free Annual Report Disclosure After Adverse Action
 
 In addition to FCRA reporting violations, analyze the account for DEBT COLLECTOR CONDUCT VIOLATIONS under the Fair Debt Collection Practices Act (FDCPA) and related state laws.
 
@@ -191,7 +213,7 @@ Return ONLY valid JSON:
       "fcraStatute": "§1681x(y) - Description or FDCPA §807/§806 etc.",
       "evidence": "Specific data points from the account (e.g., 'TransUnion balance=$500, Experian balance=$0')",
       "matchedRule": "RULE_NAME",
-      "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS",
+      "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS|PRIVACY_VIOLATION|IMPERMISSIBLE_PURPOSE|WITHHOLDING_NOTICES",
       "evidence_required": "What documentation is needed to prove this violation",
       "confidence": "confirmed|likely|possible",
       "cro_reminder": "Reminder for CRO analyst about what to ask client"
@@ -218,8 +240,11 @@ DEBT COLLECTOR SPECIFIC CHECKLIST — For EVERY debt_collection account, ALWAYS 
 12. **Inconvenient time/workplace calls**: Flag that CRO must ask about call timing and whether client said they were at work
 13. **Third-party disclosure**: Flag that CRO must ask if collector contacted anyone else about the debt
 14. **Excessive/harassing calls**: Flag that CRO must ask about call frequency, call logs, threatening language
+15. **Privacy and authorization**: Verify all inquiries had a permissible purpose, check for unauthorized report access or pulls, verify employer credit checks had prior written consumer consent
+16. **Required notices**: Check if adverse action notices were provided after credit denials or rate increases, verify negative information notices were sent before/within 30 days of first reporting, confirm credit score was disclosed when used in a credit decision, verify consumer was informed of dispute rights and right to free report
+17. **Mixed file indicators**: Check for accounts that may belong to someone with a similar SSN, similar name (Jr./Sr./III), or same address — may indicate CRA mixed consumer files
 
-For FCRA reporting violations, use category "FCRA_REPORTING". For debt collector conduct violations, use the specific category name (DEBT_COLLECTOR_DISCLOSURE, CA_LICENSE_MISSING, CEASE_CONTACT_VIOLATION, INCONVENIENT_CONTACT, THIRD_PARTY_DISCLOSURE, HARASSMENT_EXCESSIVE_CALLS).`;
+For FCRA reporting violations, use category "FCRA_REPORTING". For privacy violations, use "PRIVACY_VIOLATION". For impermissible purpose pulls, use "IMPERMISSIBLE_PURPOSE". For missing required notices, use "WITHHOLDING_NOTICES". For debt collector conduct violations, use the specific category name (DEBT_COLLECTOR_DISCLOSURE, CA_LICENSE_MISSING, CEASE_CONTACT_VIOLATION, INCONVENIENT_CONTACT, THIRD_PARTY_DISCLOSURE, HARASSMENT_EXCESSIVE_CALLS).`;
 
 /**
  * Compact system prompt for accounts with pre-computed rule-based flags.
@@ -245,7 +270,7 @@ The account data includes pre-computed "ruleBasedFlags" from our rule engine. Yo
 - Generate low-confidence duplicates of existing flags
 
 ## FCRA STATUTES:
-§1681e(b): Failure to Assure Maximum Possible Accuracy | §1681i: Failure to Conduct Reasonable Reinvestigation | §1681c: Obsolete Information | §1681s-2(a)(3): Failure to Mark as Disputed | §1681s-2(a)(5): False DOFD | §1681s-2(b): Furnisher Failure After CRA Dispute
+§1681e(b): Failure to Assure Maximum Possible Accuracy | §1681i: Failure to Conduct Reasonable Reinvestigation | §1681c: Obsolete Information | §1681s-2(a)(3): Failure to Mark as Disputed | §1681s-2(a)(5): False DOFD | §1681s-2(b): Furnisher Failure After CRA Dispute | §1681b: Permissible Purpose Requirements | §1681b(f): Employment Purpose Consent | §1681m(a): Adverse Action Notice | §1681m(h): Credit Score Disclosure | §1681j(a): Free Report After Adverse Action | §1681g: Disclosure of Information to Consumer
 
 ## SEVERITY: "critical" (clear statutory violation) | "high" (strong evidence) | "medium" (warrants dispute) | "low" (minor)
 ## CONFIDENCE: "confirmed" (clear evidence) | "likely" (strong indicators) | "possible" (pattern suggests)
@@ -257,6 +282,11 @@ The account data includes pre-computed "ruleBasedFlags" from our rule engine. Yo
 4. INCONVENIENT_CONTACT — Calls before 8AM/after 9PM or workplace calls (FDCPA §805(a)(1))
 5. THIRD_PARTY_DISCLOSURE — Debt disclosed to spouse/family/employer/friend (FDCPA §805(b))
 6. HARASSMENT_EXCESSIVE_CALLS — 7+ calls/7 days, 3+/day, threatening language (FDCPA §806)
+
+## ADDITIONAL VIOLATIONS TO CHECK:
+7. PRIVACY_VIOLATION — Credit report furnished without permissible purpose or consumer consent; employer checks without written consent (§1681b, §1681b(f))
+8. IMPERMISSIBLE_PURPOSE — Hard inquiry without corresponding credit transaction or valid purpose; pulling report on discharged bankruptcy debt (§1681b)
+9. WITHHOLDING_NOTICES — Missing adverse action notice, negative info notice, credit score disclosure, dispute rights notice, or free report notice (§1681m, §1681j, §1681g)
 
 For EVERY debt collector account, include a cro_reminder telling the CRO what to ask the client and what documentation to request.
 
@@ -270,7 +300,7 @@ Return ONLY valid JSON:
       "fcraStatute": "§1681x(y) or FDCPA §807/§806 etc.",
       "evidence": "Specific data points from the account",
       "matchedRule": "RULE_NAME",
-      "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS",
+      "category": "FCRA_REPORTING|DEBT_COLLECTOR_DISCLOSURE|CA_LICENSE_MISSING|CEASE_CONTACT_VIOLATION|INCONVENIENT_CONTACT|THIRD_PARTY_DISCLOSURE|HARASSMENT_EXCESSIVE_CALLS|PRIVACY_VIOLATION|IMPERMISSIBLE_PURPOSE|WITHHOLDING_NOTICES",
       "evidence_required": "What documentation is needed",
       "confidence": "confirmed|likely|possible",
       "cro_reminder": "Reminder for CRO analyst"
