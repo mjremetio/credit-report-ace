@@ -118,27 +118,51 @@ const TRI_BUREAU_FIELD_LABELS = [
   "CLOSED ACCOUNTS",
   "DELINQUENT",
   "DEROGATORY",
+  "Collection",
   "BALANCES",
   "PAYMENTS",
   "PUBLIC RECORDS",
   "INQUIRIES (2 years)",
   "INQUIRIES",
+  "Inquiries(2 years)",
   // Personal info fields
   "NAME",
   "ALSO KNOWN AS",
+  "Also Known As",
+  "Former",
   "DATE OF BIRTH",
+  "Date of Birth",
   "CURRENT ADDRESS",
+  "Current Address",
   "PREVIOUS ADDRESS",
+  "Previous Address",
+  "Previous Address(es)",
   "EMPLOYER",
+  "Employers",
   "CREDIT REPORT",
   "CREDIT REPORTDATE",
+  "Credit Report Date",
   "DATE",
+  // Public records fields
+  "Type",
+  "Status",
+  "Date Filed/Reported",
+  "Reference#",
+  "Closing Date",
+  "Asset Amount",
+  "Court",
+  "Liability",
+  "Exempt Amount",
+  "Remarks",
   // Inquiry table fields
   "Creditor Name",
   "Date of Enquiry",
   "Address",
   "Phone Number",
   "Credit Bureau",
+  // Payment history labels
+  "Days Late",
+  "Days Late - 7 Year History",
 ];
 
 /**
@@ -174,6 +198,10 @@ function restructureTriBureauPdfText(rawText: string): string | null {
 
   // Track current section for context
   let currentSection = "";
+  // Track payment history rows per account to assign bureau labels
+  let paymentHistoryRowIndex = 0;
+  let inPaymentHistoryBlock = false;
+  let inDaysLateBlock = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -182,6 +210,14 @@ function restructureTriBureauPdfText(rawText: string): string | null {
     // Skip empty lines
     if (!trimmed) {
       outputLines.push("");
+      // Reset payment history tracking on blank lines if we've collected rows
+      if (inPaymentHistoryBlock && paymentHistoryRowIndex >= 3) {
+        inPaymentHistoryBlock = false;
+        paymentHistoryRowIndex = 0;
+      }
+      if (inDaysLateBlock) {
+        inDaysLateBlock = false;
+      }
       continue;
     }
 
@@ -191,6 +227,9 @@ function restructureTriBureauPdfText(rawText: string): string | null {
       const sectionName = sectionMatch[1].trim();
       currentSection = sectionName;
       outputLines.push(`\n=== ${sectionName.toUpperCase()} ===`);
+      inPaymentHistoryBlock = false;
+      inDaysLateBlock = false;
+      paymentHistoryRowIndex = 0;
       continue;
     }
 
@@ -200,8 +239,88 @@ function restructureTriBureauPdfText(rawText: string): string | null {
       continue;
     }
 
-    // Handle page breaks
+    // Handle page breaks - don't reset payment history tracking
     if (trimmed.includes("--- PAGE BREAK ---")) {
+      outputLines.push(trimmed);
+      continue;
+    }
+
+    // Detect "Two-Year Payment History" header
+    if (/^Two-Year\s+Payment\s+History/i.test(trimmed)) {
+      outputLines.push("Two-Year Payment History:");
+      inPaymentHistoryBlock = true;
+      inDaysLateBlock = false;
+      paymentHistoryRowIndex = 0;
+      continue;
+    }
+
+    // Detect "Days Late - 7 Year History" header
+    if (/^Days\s+Late\s*-?\s*7\s*Year\s*History/i.test(trimmed)) {
+      outputLines.push("Days Late - 7 Year History:");
+      inDaysLateBlock = true;
+      inPaymentHistoryBlock = false;
+      paymentHistoryRowIndex = 0;
+      continue;
+    }
+
+    // Handle "None Reported" in payment history context - assign to bureau
+    if (inPaymentHistoryBlock && /^None\s+Reported$/i.test(trimmed)) {
+      const bureau = ["TransUnion", "Experian", "Equifax"][paymentHistoryRowIndex] || "Unknown";
+      outputLines.push(`Payment History ${bureau}: None Reported`);
+      paymentHistoryRowIndex++;
+      continue;
+    }
+
+    // Handle payment history month-code rows (assign to bureaus in order)
+    if (inPaymentHistoryBlock && isPaymentHistoryLine(trimmed)) {
+      const bureau = ["TransUnion", "Experian", "Equifax"][paymentHistoryRowIndex] || "Unknown";
+      outputLines.push(`Payment History ${bureau}: ${trimmed}`);
+      paymentHistoryRowIndex++;
+      continue;
+    }
+
+    // Handle Days Late rows with bureau labels
+    if (inDaysLateBlock) {
+      // Check for "30 : 0 60 : 0 90 : 0" pattern or "--"
+      const daysLatePattern = /(\d+)\s*:\s*(\d+)/g;
+      const pairs: string[] = [];
+      let m;
+      while ((m = daysLatePattern.exec(trimmed)) !== null) {
+        pairs.push(`${m[1]}:${m[2]}`);
+      }
+      if (pairs.length >= 3) {
+        // Multiple bureaus on one line
+        if (pairs.length >= 9) {
+          outputLines.push(`Days Late | TransUnion: ${pairs.slice(0, 3).join(" ")} | Experian: ${pairs.slice(3, 6).join(" ")} | Equifax: ${pairs.slice(6, 9).join(" ")}`);
+        } else if (pairs.length >= 6) {
+          outputLines.push(`Days Late | TransUnion: ${pairs.slice(0, 3).join(" ")} | Experian: ${pairs.slice(3, 6).join(" ")} | Equifax: --`);
+        } else {
+          const bureau = ["TransUnion", "Experian", "Equifax"][paymentHistoryRowIndex] || "Unknown";
+          outputLines.push(`Days Late ${bureau}: ${pairs.join(" ")}`);
+          paymentHistoryRowIndex++;
+        }
+        continue;
+      } else if (trimmed === "--") {
+        const bureau = ["TransUnion", "Experian", "Equifax"][paymentHistoryRowIndex] || "Unknown";
+        outputLines.push(`Days Late ${bureau}: --`);
+        paymentHistoryRowIndex++;
+        continue;
+      }
+      // If it doesn't look like days late data, exit the block
+      inDaysLateBlock = false;
+    }
+
+    // Detect account type category headers
+    if (/^(Open\s+Account|Installment|Revolving|Mortgage|Collection)$/i.test(trimmed)) {
+      outputLines.push(`[Account Category: ${trimmed}]`);
+      inPaymentHistoryBlock = false;
+      inDaysLateBlock = false;
+      paymentHistoryRowIndex = 0;
+      continue;
+    }
+
+    // Detect "At-a-glance" legend lines - pass through as context
+    if (/^At-a-glance/i.test(trimmed)) {
       outputLines.push(trimmed);
       continue;
     }
@@ -210,11 +329,20 @@ function restructureTriBureauPdfText(rawText: string): string | null {
     const structured = tryStructureFieldLine(line, currentSection, fieldLabelSet);
     if (structured) {
       outputLines.push(structured);
+      // Exit payment history tracking when we hit a structured field line
+      inPaymentHistoryBlock = false;
+      inDaysLateBlock = false;
     } else {
       // Pass through lines that don't match field patterns (creditor names, headers, etc.)
       // but still clean up excessive whitespace
       const cleaned = trimmed.replace(/\s{2,}/g, "  ");
       outputLines.push(cleaned);
+      // If we see a creditor-like line, reset payment history tracking
+      if (/^[A-Z][A-Z\s&'.\/\-]{3,}$/.test(cleaned) && cleaned.length < 50) {
+        inPaymentHistoryBlock = false;
+        inDaysLateBlock = false;
+        paymentHistoryRowIndex = 0;
+      }
     }
   }
 
@@ -276,23 +404,34 @@ function tryStructureFieldLine(
   }
 
   // Special case: "Days Late - 7 Year History" line with embedded values
-  if (!fieldLabel && /^(30|60|90)\s*:\s*\d+/i.test(trimmed)) {
-    // This is a "30 : 0  60 : 0  90 : 0  30 : 0  60 : 0  90 : 0" line
-    // Parse the days late counts per bureau
-    const daysLatePattern = /(\d+)\s*:\s*(\d+)/g;
-    const pairs: string[] = [];
-    let m;
-    while ((m = daysLatePattern.exec(trimmed)) !== null) {
-      pairs.push(`${m[1]}:${m[2]}`);
-    }
+  // Handles both standalone "30 : 0  60 : 0  90 : 0" lines and
+  // "Days Late  30:0 60:0 90:0  30:0 60:0 90:0  30:0 60:0 90:0" lines
+  if (!fieldLabel) {
+    const isDaysLateLine = /^(30|60|90)\s*:\s*\d+/i.test(trimmed) ||
+      /^Days\s+Late/i.test(trimmed);
 
-    if (pairs.length >= 6) {
-      // 6 values = 3 per bureau (30, 60, 90 for each)
-      return `Days Late | TransUnion: ${pairs.slice(0, 3).join(" ")} | Experian: ${pairs.slice(3, 6).join(" ")}` +
-        (pairs.length >= 9 ? ` | Equifax: ${pairs.slice(6, 9).join(" ")}` : ` | Equifax: --`);
-    } else if (pairs.length >= 3) {
-      return `Days Late | TransUnion: ${pairs.slice(0, 3).join(" ")} | Experian: -- | Equifax: --`;
+    if (isDaysLateLine) {
+      const daysLatePattern = /(\d+)\s*:\s*(\d+)/g;
+      const pairs: string[] = [];
+      let m;
+      while ((m = daysLatePattern.exec(trimmed)) !== null) {
+        pairs.push(`${m[1]}:${m[2]}`);
+      }
+
+      if (pairs.length >= 6) {
+        // 6+ values = 3 per bureau (30, 60, 90 for each)
+        return `Days Late | TransUnion: ${pairs.slice(0, 3).join(" ")} | Experian: ${pairs.slice(3, 6).join(" ")}` +
+          (pairs.length >= 9 ? ` | Equifax: ${pairs.slice(6, 9).join(" ")}` : ` | Equifax: --`);
+      } else if (pairs.length >= 3) {
+        return `Days Late | TransUnion: ${pairs.slice(0, 3).join(" ")} | Experian: -- | Equifax: --`;
+      }
     }
+  }
+
+  // Special case: Payment history month lines (e.g., "OK Jan-26 OK Dec-25 CO Nov-25 ...")
+  // These appear as 2-3 rows of month-code pairs, one row per bureau
+  if (!fieldLabel && isPaymentHistoryLine(trimmed)) {
+    return `Payment History: ${trimmed}`;
   }
 
   if (!fieldLabel) {
@@ -349,6 +488,21 @@ function isDataLikeValue(s: string): boolean {
   if (/^\d+$/.test(t)) return true;
   if (/^\d+\s*Month/i.test(t)) return true;
   return false;
+}
+
+/**
+ * Check if a line is a payment history grid row.
+ * These look like: "OK Jan-26 OK Dec-25 CO Nov-25 30 Oct-25 ..."
+ * or: "Jan-26 Dec-25 Nov-25 Oct-25 Sep-25 ..."
+ */
+function isPaymentHistoryLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length < 6) return false;
+  // Count month references (e.g., "Jan-26", "Feb-25", "Dec-24")
+  const monthPattern = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2}/gi;
+  const monthMatches = trimmed.match(monthPattern);
+  // Need at least 3 month references to be a payment history line
+  return (monthMatches?.length || 0) >= 3;
 }
 
 // ── Text extraction ────────────────────────────────────────────────
@@ -556,18 +710,31 @@ function splitTradelineSection(text: string, baseOffset: number): ReportSection[
 
   let currentBlock: string[] = [];
   let currentLabel = "";
+  let currentCategory = ""; // Track account type category (Open Account, Installment, etc.)
   let blockStart = 0;
   let charOffset = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const trimmedLine = line.trim();
+
+    // Detect account type category markers from restructured text
+    const categoryMatch = trimmedLine.match(/^\[Account Category:\s*(.+)\]$/i);
+    if (categoryMatch) {
+      currentCategory = categoryMatch[1];
+      currentBlock.push(line);
+      charOffset += line.length + 1;
+      continue;
+    }
+
     const isCreditorHeader = isLikelyCreditorName(line, lines[i + 1] || "");
 
     if (isCreditorHeader && currentBlock.length > 3) {
       // Save the previous block
+      const label = currentLabel || "Unknown Account";
       blocks.push({
         type: "tradeline",
-        label: currentLabel || "Unknown Account",
+        label: currentCategory ? `${currentCategory}: ${label}` : label,
         text: currentBlock.join("\n").trim(),
         startIndex: baseOffset + blockStart,
       });
@@ -591,9 +758,10 @@ function splitTradelineSection(text: string, baseOffset: number): ReportSection[
   if (currentBlock.length > 3) {
     const blockText = currentBlock.join("\n").trim();
     if (blockText.length > 50) {
+      const label = currentLabel || "Unknown Section";
       blocks.push({
         type: currentLabel ? "tradeline" : "unknown",
-        label: currentLabel || "Unknown Section",
+        label: currentCategory ? `${currentCategory}: ${label}` : label,
         text: blockText,
         startIndex: baseOffset + blockStart,
       });
@@ -634,10 +802,15 @@ function isLikelyCreditorName(line: string, nextLine: string): boolean {
   // Skip table data rows that look like field labels with pipe separators
   if (trimmed.includes("|") && /^(Account\s+(Number|#|Type|Rating)|Status|Balance|Credit\s+Limit|High\s+Balance|Monthly\s+Payment|Date\s+|Last\s+|Payment\s+(Status|History|Amount)|Creditor\s+Type|Past\s+Due|Terms|Remarks|Original|Dispute\s+Status|Closed\s+Date|Term\s+Length|Balance\s+Owed)/i.test(trimmed)) return false;
   // Skip "Two-Year Payment History", "Days Late", "None Reported" lines
-  if (/^(Two-Year|Days\s+Late|None\s+Reported|At-a-glance|Unknown|OK|Current|Payment\s+Plan|Repossession|Collection|VantageScore)/i.test(trimmed)) return false;
+  if (/^(Two-Year|Days\s+Late|None\s+Reported|At-a-glance|Unknown|OK|Current|Payment\s+Plan|Repossession|VantageScore)/i.test(trimmed)) return false;
   // Skip payment history month labels (e.g., "Jan-25", "OK Dec-24", "30 : 0")
   if (/^(OK\s+)?[A-Z][a-z]{2}-\d{2}/.test(trimmed)) return false;
   if (/^\d+\s*:\s*\d+/.test(trimmed)) return false;
+  // Skip "Payment History TransUnion/Experian/Equifax:" lines from restructured text
+  if (/^Payment\s+History\s+(TransUnion|Experian|Equifax)/i.test(trimmed)) return false;
+  if (/^Days\s+Late\s+(TransUnion|Experian|Equifax)/i.test(trimmed)) return false;
+  // Skip account type category headers (these are not creditor names)
+  if (/^(Open\s+Account|Installment|Revolving|Mortgage|Collection)$/i.test(trimmed)) return false;
 
   // Check for common creditor patterns
   const hasCreditorIndicator = CREDITOR_INDICATORS.some(p => p.test(trimmed));
