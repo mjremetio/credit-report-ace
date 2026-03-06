@@ -134,6 +134,24 @@ export const tradelineEvidence = pgTable("tradeline_evidence", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// ── Violation Pattern Memory (learning from confirmed violations) ──
+export const violationPatterns = pgTable("violation_patterns", {
+  id: serial("id").primaryKey(),
+  violationType: text("violation_type").notNull(),
+  matchedRule: text("matched_rule"),
+  category: text("category"),
+  severity: text("severity").notNull(),
+  accountType: text("account_type").notNull(),        // debt_collection, charge_off, repossession
+  creditorPattern: text("creditor_pattern"),           // creditor name pattern for matching
+  evidencePattern: text("evidence_pattern"),           // key evidence details to look for
+  fcraStatute: text("fcra_statute"),
+  confidence: text("confidence"),
+  timesConfirmed: integer("times_confirmed").default(1).notNull(),
+  timesRejected: integer("times_rejected").default(0).notNull(),
+  lastConfirmedAt: timestamp("last_confirmed_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const letters = pgTable("letters", {
   id: serial("id").primaryKey(),
   negativeAccountId: integer("negative_account_id").notNull().references(() => negativeAccounts.id, { onDelete: "cascade" }),
@@ -152,6 +170,7 @@ export const insertNegativeAccountSchema = createInsertSchema(negativeAccounts).
 export const insertViolationSchema = createInsertSchema(violations).omit({ id: true, createdAt: true });
 export const insertParsedReportSchema = createInsertSchema(parsedReports).omit({ id: true, createdAt: true });
 export const insertTradelineEvidenceSchema = createInsertSchema(tradelineEvidence).omit({ id: true, createdAt: true });
+export const insertViolationPatternSchema = createInsertSchema(violationPatterns).omit({ id: true, createdAt: true });
 export const insertLetterSchema = createInsertSchema(letters).omit({ id: true, createdAt: true });
 
 export type Report = typeof reports.$inferSelect;
@@ -170,5 +189,7 @@ export type ParsedReport = typeof parsedReports.$inferSelect;
 export type InsertParsedReport = z.infer<typeof insertParsedReportSchema>;
 export type TradelineEvidence = typeof tradelineEvidence.$inferSelect;
 export type InsertTradelineEvidence = z.infer<typeof insertTradelineEvidenceSchema>;
+export type ViolationPattern = typeof violationPatterns.$inferSelect;
+export type InsertViolationPattern = z.infer<typeof insertViolationPatternSchema>;
 export type Letter = typeof letters.$inferSelect;
 export type InsertLetter = z.infer<typeof insertLetterSchema>;

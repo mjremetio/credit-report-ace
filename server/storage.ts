@@ -1,13 +1,14 @@
 import { db } from "./db";
 import {
   reports, findings, accounts, scans, negativeAccounts, violations, letters,
-  parsedReports, tradelineEvidence,
+  parsedReports, tradelineEvidence, violationPatterns,
   type Report, type InsertReport, type Finding, type InsertFinding,
   type Account, type InsertAccount, type Scan, type InsertScan,
   type NegativeAccount, type InsertNegativeAccount,
   type Violation, type InsertViolation,
   type ParsedReport, type InsertParsedReport,
   type TradelineEvidence, type InsertTradelineEvidence,
+  type ViolationPattern, type InsertViolationPattern,
 } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -54,6 +55,13 @@ export interface IStorage {
   createTradelineEvidence(evidence: InsertTradelineEvidence): Promise<TradelineEvidence>;
   createTradelineEvidenceBatch(evidenceList: InsertTradelineEvidence[]): Promise<TradelineEvidence[]>;
   getTradelineEvidenceByScan(parsedReportId: number): Promise<TradelineEvidence[]>;
+
+  // Violation pattern memory
+  createOrUpdateViolationPattern(pattern: InsertViolationPattern): Promise<ViolationPattern>;
+  getViolationPatternsByAccountType(accountType: string): Promise<ViolationPattern[]>;
+  getAllViolationPatterns(): Promise<ViolationPattern[]>;
+  incrementPatternConfirmed(id: number): Promise<ViolationPattern | undefined>;
+  incrementPatternRejected(id: number): Promise<ViolationPattern | undefined>;
 }
 
 class DatabaseStorage implements IStorage {
@@ -229,6 +237,67 @@ class DatabaseStorage implements IStorage {
 
   async getTradelineEvidenceByScan(parsedReportId: number): Promise<TradelineEvidence[]> {
     return db.select().from(tradelineEvidence).where(eq(tradelineEvidence.parsedReportId, parsedReportId)).orderBy(tradelineEvidence.createdAt);
+  }
+
+  // ── Violation Pattern Memory ───────────────────────────────────────
+  async createOrUpdateViolationPattern(pattern: InsertViolationPattern): Promise<ViolationPattern> {
+    // Check if a similar pattern already exists
+    const existing = await db.select().from(violationPatterns)
+      .where(eq(violationPatterns.violationType, pattern.violationType))
+      .then(rows => rows.find(r =>
+        r.accountType === pattern.accountType &&
+        r.matchedRule === (pattern.matchedRule || null)
+      ));
+
+    if (existing) {
+      const [updated] = await db.update(violationPatterns)
+        .set({
+          timesConfirmed: existing.timesConfirmed + 1,
+          lastConfirmedAt: new Date(),
+          severity: pattern.severity || existing.severity,
+          evidencePattern: pattern.evidencePattern || existing.evidencePattern,
+        })
+        .where(eq(violationPatterns.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(violationPatterns).values(pattern).returning();
+    return created;
+  }
+
+  async getViolationPatternsByAccountType(accountType: string): Promise<ViolationPattern[]> {
+    return db.select().from(violationPatterns)
+      .where(eq(violationPatterns.accountType, accountType))
+      .orderBy(desc(violationPatterns.timesConfirmed));
+  }
+
+  async getAllViolationPatterns(): Promise<ViolationPattern[]> {
+    return db.select().from(violationPatterns)
+      .orderBy(desc(violationPatterns.timesConfirmed));
+  }
+
+  async incrementPatternConfirmed(id: number): Promise<ViolationPattern | undefined> {
+    const existing = await db.select().from(violationPatterns).where(eq(violationPatterns.id, id));
+    if (!existing[0]) return undefined;
+    const [updated] = await db.update(violationPatterns)
+      .set({
+        timesConfirmed: existing[0].timesConfirmed + 1,
+        lastConfirmedAt: new Date(),
+      })
+      .where(eq(violationPatterns.id, id))
+      .returning();
+    return updated;
+  }
+
+  async incrementPatternRejected(id: number): Promise<ViolationPattern | undefined> {
+    const existing = await db.select().from(violationPatterns).where(eq(violationPatterns.id, id));
+    if (!existing[0]) return undefined;
+    const [updated] = await db.update(violationPatterns)
+      .set({ timesRejected: existing[0].timesRejected + 1 })
+      .where(eq(violationPatterns.id, id))
+      .returning();
+    return updated;
   }
 
 }

@@ -183,6 +183,8 @@ export async function runReportPipeline(
 
   // Step 8b: Run AI violation detection in parallel batches of 5
   console.time("[pipeline] Step 8b: AI violation detection");
+  // Fetch learned patterns for enhanced scanning accuracy
+  const allLearnedPatterns = await storage.getAllViolationPatterns();
   const BATCH_SIZE = 5;
   for (let i = 0; i < accountEntries.length; i += BATCH_SIZE) {
     const batch = accountEntries.slice(i, i + BATCH_SIZE);
@@ -191,7 +193,8 @@ export async function runReportPipeline(
       batch.map(async ({ negAccount }) => {
         // Clear any existing violations before detecting to prevent accumulation on re-scans
         await storage.clearViolationsByAccount(negAccount.id);
-        const detected = await detectViolations(negAccount, null);
+        const patterns = allLearnedPatterns.filter(p => p.accountType === negAccount.accountType);
+        const detected = await detectViolations(negAccount, null, patterns);
         if (detected.length > 0) {
           await storage.createViolationsBatch(detected.map(v => ({
             negativeAccountId: negAccount.id,
@@ -667,6 +670,8 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
 
   // Step 2: Run AI violation detection in parallel batches of 5
   console.time("[violation-pipeline] Step 2: AI violation detection");
+  // Fetch learned patterns for enhanced scanning accuracy
+  const violationLearnedPatterns = await storage.getAllViolationPatterns();
   const BATCH_SIZE = 5;
   let totalViolations = 0;
   let processedCount = 0;
@@ -678,7 +683,8 @@ export async function runViolationPipeline(scanId: number): Promise<ViolationRes
       batch.map(async ({ negAccount }) => {
         // Clear any existing violations before re-detecting to prevent accumulation on re-scans
         await storage.clearViolationsByAccount(negAccount.id);
-        const detected = await detectViolations(negAccount, scan.clientState || null);
+        const patterns = violationLearnedPatterns.filter(p => p.accountType === negAccount.accountType);
+        const detected = await detectViolations(negAccount, scan.clientState || null, patterns);
         if (detected.length > 0) {
           await storage.createViolationsBatch(detected.map(v => ({
             negativeAccountId: negAccount.id,
@@ -893,6 +899,8 @@ export async function runManualEntryPipeline(scanId: number): Promise<PipelineRe
   }
 
   // Run violation detection in parallel batches of 5
+  // Fetch learned patterns for enhanced scanning accuracy
+  const manualLearnedPatterns = await storage.getAllViolationPatterns();
   const MANUAL_BATCH_SIZE = 5;
   for (let i = 0; i < enrichedAccounts.length; i += MANUAL_BATCH_SIZE) {
     const batch = enrichedAccounts.slice(i, i + MANUAL_BATCH_SIZE);
@@ -900,7 +908,8 @@ export async function runManualEntryPipeline(scanId: number): Promise<PipelineRe
     const batchResults = await Promise.allSettled(
       batch.map(async (acct: any) => {
         await storage.clearViolationsByAccount(acct.id);
-        const detected = await detectViolations(acct, clientState);
+        const patterns = manualLearnedPatterns.filter((p: any) => p.accountType === acct.accountType);
+        const detected = await detectViolations(acct, clientState, patterns);
         if (detected.length > 0) {
           await storage.createViolationsBatch(detected.map(v => ({
             negativeAccountId: acct.id,

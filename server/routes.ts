@@ -430,6 +430,11 @@ export async function registerRoutes(
 
       const result = await runViolationPipeline(scanId);
 
+      // Auto-set review status to in_progress when violations are found
+      if (result.violationsFound > 0 && (!scan.reviewStatus || scan.reviewStatus === "pending")) {
+        await storage.updateScan(scanId, { reviewStatus: "in_progress" });
+      }
+
       res.json({
         scanId: result.scanId,
         accountsCreated: result.accountsCreated,
@@ -521,7 +526,10 @@ export async function registerRoutes(
 
       await storage.clearViolationsByAccount(id);
 
-      const detectedViolations = await detectViolations(account, clientState);
+      // Fetch learned patterns for this account type to enhance scanning accuracy
+      const learnedPatterns = await storage.getViolationPatternsByAccountType(account.accountType);
+
+      const detectedViolations = await detectViolations(account, clientState, learnedPatterns);
       const savedViolations = [];
       for (const v of detectedViolations) {
         const saved = await storage.createViolation({
@@ -542,6 +550,15 @@ export async function registerRoutes(
         savedViolations.push(saved);
       }
       await storage.updateWorkflowStep(id, "scanned");
+
+      // Auto-set review status to in_progress when violations are found
+      if (savedViolations.length > 0) {
+        const scan = await storage.getScan(account.scanId);
+        if (scan && (!scan.reviewStatus || scan.reviewStatus === "pending")) {
+          await storage.updateScan(account.scanId, { reviewStatus: "in_progress" });
+        }
+      }
+
       res.json({ violations: savedViolations });
     } catch (error) {
       console.error("Error scanning account:", error);
@@ -558,6 +575,11 @@ export async function registerRoutes(
       if (!scan) return res.status(404).json({ error: "Scan not found" });
 
       const result = await runManualEntryPipeline(scanId);
+
+      // Auto-set review status to in_progress when violations are found
+      if (result.violationsFound > 0 && (!scan.reviewStatus || scan.reviewStatus === "pending")) {
+        await storage.updateScan(scanId, { reviewStatus: "in_progress" });
+      }
 
       res.json({
         scanId: result.scanId,
@@ -679,6 +701,27 @@ export async function registerRoutes(
         rejectedViolationCount: rejected,
         status: "completed",
       });
+
+      // Learn from confirmed violations — save patterns for future scanning
+      const negAccounts = await storage.getNegativeAccountsByScan(id);
+      const accountMap = new Map(negAccounts.map(a => [a.id, a]));
+      for (const v of allViolations) {
+        const acct = accountMap.get(v.negativeAccountId);
+        if (!acct) continue;
+        if (v.reviewStatus === "confirmed" || v.reviewStatus === "modified") {
+          await storage.createOrUpdateViolationPattern({
+            violationType: v.violationType,
+            matchedRule: v.matchedRule,
+            category: v.category,
+            severity: v.severityOverride || v.severity,
+            accountType: acct.accountType,
+            creditorPattern: acct.creditor,
+            evidencePattern: v.evidence?.substring(0, 500) || null,
+            fcraStatute: v.fcraStatute,
+            confidence: v.confidence,
+          });
+        }
+      }
 
       res.json(updated);
     } catch (error) {
@@ -1304,6 +1347,30 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching CRO review:", error);
       res.status(500).json({ error: "Failed to fetch CRO review data" });
+    }
+  });
+
+  // ========== VIOLATION PATTERN MEMORY ENDPOINTS ==========
+
+  // GET /api/violation-patterns — Get all learned violation patterns
+  app.get("/api/violation-patterns", async (_req, res) => {
+    try {
+      const patterns = await storage.getAllViolationPatterns();
+      res.json(patterns);
+    } catch (error) {
+      console.error("Error fetching violation patterns:", error);
+      res.status(500).json({ error: "Failed to fetch violation patterns" });
+    }
+  });
+
+  // GET /api/violation-patterns/:accountType — Get patterns by account type
+  app.get("/api/violation-patterns/:accountType", async (req, res) => {
+    try {
+      const patterns = await storage.getViolationPatternsByAccountType(req.params.accountType);
+      res.json(patterns);
+    } catch (error) {
+      console.error("Error fetching violation patterns:", error);
+      res.status(500).json({ error: "Failed to fetch violation patterns" });
     }
   });
 

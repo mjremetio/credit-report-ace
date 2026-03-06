@@ -5,7 +5,7 @@ import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
   Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
-  MapPin, Download, ClipboardCheck, Activity, UploadCloud, Database
+  MapPin, Download, ClipboardCheck, Activity, UploadCloud, Database, Pencil
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
@@ -1294,7 +1294,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                         </h4>
                         <div className="space-y-2">
                           {acctFcra.map((v: any) => (
-                            <ViolationCard key={v.id} violation={v} />
+                            <ViolationCard key={v.id} violation={v} scanId={scanId} />
                           ))}
                         </div>
                       </div>
@@ -1308,7 +1308,7 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                         </h4>
                         <div className="space-y-2">
                           {acctFdcpa.map((v: any) => (
-                            <ViolationCard key={v.id} violation={v} />
+                            <ViolationCard key={v.id} violation={v} scanId={scanId} />
                           ))}
                         </div>
                       </div>
@@ -1423,7 +1423,8 @@ function ReportField({ label, value }: { label: string; value: string | null | u
   );
 }
 
-function ViolationCard({ violation }: { violation: any }) {
+function ViolationCard({ violation, scanId }: { violation: any; scanId: number }) {
+  const [, navigate] = useLocation();
   const confidenceColors: Record<string, string> = {
     confirmed: "border-green-500/30 text-green-600 bg-green-500/10",
     likely: "border-yellow-500/30 text-yellow-600 bg-yellow-500/10",
@@ -1432,14 +1433,22 @@ function ViolationCard({ violation }: { violation: any }) {
 
   return (
     <div data-testid={`violation-${violation.id}`} className="bg-background border border-border rounded-lg p-4">
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <SeverityBadge severity={violation.severity} />
-        <span className="text-sm text-foreground font-semibold">{violation.violationType}</span>
-        {violation.confidence && (
-          <span className={`text-xs font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
-            {violation.confidence}
-          </span>
-        )}
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SeverityBadge severity={violation.severity} />
+          <span className="text-sm text-foreground font-semibold">{violation.violationType}</span>
+          {violation.confidence && (
+            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
+              {violation.confidence}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => navigate(`/review/${scanId}`)}
+          className="px-3 py-1.5 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-1.5 text-xs flex-shrink-0"
+        >
+          <Pencil className="w-3 h-3" /> Edit Violation Details
+        </button>
       </div>
       <p className="text-sm font-mono text-foreground/80 leading-relaxed">{violation.explanation}</p>
       {violation.evidence && (
