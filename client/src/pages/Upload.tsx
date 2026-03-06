@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -12,6 +12,10 @@ import {
   extractFileText, structureExtractedText, structureUploadFile,
   runViolationAnalysis, updateScan, createManualViolation,
 } from "@/lib/api";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type InputMode = "file" | "text";
 type AnalysisMode = "ai" | "manual" | null;
@@ -93,6 +97,9 @@ export default function Upload() {
   const [manualViolations, setManualViolations] = useState<ManualViolationEntry[]>([{ ...EMPTY_VIOLATION }]);
   const [manualSaving, setManualSaving] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+
+  // Preview modal state
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
 
   // Structured JSON display state
   const [organizedReport, setOrganizedReport] = useState<any>(null);
@@ -388,6 +395,7 @@ export default function Upload() {
     setManualViolations([{ ...EMPTY_VIOLATION }]);
     setManualSaving(false);
     setSelectedAccountId(null);
+    setPreviewModalOpen(false);
     setExpandedSections({
       personalInfo: true,
       scores: true,
@@ -1172,6 +1180,13 @@ export default function Upload() {
               <p className="text-sm font-mono text-muted-foreground max-w-lg mx-auto">
                 Select how you want to identify violations in the structured credit report data.
               </p>
+              <button
+                onClick={() => setPreviewModalOpen(true)}
+                className="mt-3 px-4 py-2 bg-secondary border border-border text-foreground rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2 mx-auto"
+              >
+                <Eye className="w-4 h-4" />
+                Preview Report
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1282,6 +1297,13 @@ export default function Upload() {
                     Add violations you have identified in the credit report. Each violation will be saved to the scan.
                   </p>
                 </div>
+                <button
+                  onClick={() => setPreviewModalOpen(true)}
+                  className="px-3 py-1.5 bg-secondary border border-border text-foreground rounded-lg hover:bg-secondary/80 transition-colors font-mono text-xs inline-flex items-center gap-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Preview Report
+                </button>
                 <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-600 bg-yellow-500/10">
                   {manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute).length} valid
                 </span>
@@ -1470,6 +1492,13 @@ export default function Upload() {
               <p className="text-muted-foreground max-w-md font-mono text-sm">
                 Scanning structured data for FCRA/FDCPA violations across all negative tradelines...
               </p>
+              <button
+                onClick={() => setPreviewModalOpen(true)}
+                className="mt-4 px-4 py-2 bg-secondary border border-border text-foreground rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2"
+              >
+                <Eye className="w-4 h-4" />
+                Preview Report While Waiting
+              </button>
               <div className="w-full max-w-md mt-8">
                 <div className="flex justify-between text-xs font-mono mb-2">
                   <span className="text-destructive">Detecting violations...</span>
@@ -1601,6 +1630,17 @@ export default function Upload() {
           </motion.div>
         )}
 
+        {/* ── Report Preview Modal ── */}
+        <ReportPreviewModal
+          open={previewModalOpen}
+          onOpenChange={setPreviewModalOpen}
+          originalFile={originalFile}
+          rawText={rawText}
+          fileName={fileName}
+          organizedReport={organizedReport}
+          structureResult={structureResult}
+        />
+
         {/* ── Terminal Logs ── */}
         <AnimatePresence>
           {logs.length > 0 && (
@@ -1623,6 +1663,300 @@ export default function Upload() {
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+// ── Report Preview Modal ──────────────────────────────────────────
+
+function ReportPreviewModal({
+  open,
+  onOpenChange,
+  originalFile,
+  rawText,
+  fileName,
+  organizedReport,
+  structureResult,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  originalFile: File | null;
+  rawText: string;
+  fileName: string;
+  organizedReport: any;
+  structureResult: any;
+}) {
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+
+  // Create/revoke object URL when modal opens/closes or file changes
+  useEffect(() => {
+    if (open && originalFile) {
+      const url = URL.createObjectURL(originalFile);
+      setFilePreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+        setFilePreviewUrl(null);
+      };
+    } else {
+      setFilePreviewUrl(null);
+    }
+  }, [open, originalFile]);
+
+  const isImage = originalFile?.type?.startsWith("image/");
+  const isPdf = originalFile?.type === "application/pdf" || originalFile?.name?.endsWith(".pdf");
+
+  // Build report summary for the Report Preview tab
+  const consumerName = organizedReport?.personalInformation?.name || structureResult?.consumerName || "Unknown Consumer";
+  const scores = organizedReport?.creditScores;
+  const accountHistory = organizedReport?.accountHistory || [];
+  const collections = organizedReport?.collections || [];
+  const publicInfo = organizedReport?.publicInformation || [];
+  const inquiries = organizedReport?.inquiries || [];
+  const tradelineCount = structureResult?.tradelineCount || 0;
+  const issueFlagsDetected = structureResult?.issueFlagsDetected || 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="font-display text-lg flex items-center gap-2">
+            <Eye className="w-5 h-5 text-primary" />
+            Report Preview
+          </DialogTitle>
+          <DialogDescription className="text-xs font-mono">
+            {fileName || "Credit Report"} — Review the uploaded file and structured report data
+          </DialogDescription>
+        </DialogHeader>
+
+        <Tabs defaultValue="report" className="flex-1 flex flex-col overflow-hidden">
+          <TabsList className="w-full grid grid-cols-2">
+            <TabsTrigger value="file" className="text-xs font-mono gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              File Preview
+            </TabsTrigger>
+            <TabsTrigger value="report" className="text-xs font-mono gap-1.5">
+              <CreditCard className="w-3.5 h-3.5" />
+              Report Preview
+            </TabsTrigger>
+          </TabsList>
+
+          {/* File Preview Tab */}
+          <TabsContent value="file" className="flex-1 overflow-auto mt-3">
+            <div className="border border-border rounded-lg overflow-hidden bg-background">
+              {originalFile && isImage ? (
+                <div className="p-4 flex items-center justify-center bg-secondary/30">
+                  <img
+                    src={filePreviewUrl || ""}
+                    alt={fileName}
+                    className="max-w-full max-h-[60vh] object-contain rounded"
+                  />
+                </div>
+              ) : originalFile && isPdf ? (
+                <div className="h-[60vh]">
+                  <iframe
+                    src={filePreviewUrl || ""}
+                    className="w-full h-full border-0"
+                    title="PDF Preview"
+                  />
+                </div>
+              ) : rawText ? (
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-mono font-medium text-foreground">{fileName || "Raw Text"}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs font-mono text-muted-foreground">
+                      <span>{rawText.split("\n").length} lines</span>
+                      <span>{rawText.length.toLocaleString()} chars</span>
+                    </div>
+                  </div>
+                  <pre className="bg-secondary/50 border border-border rounded-lg p-4 overflow-auto max-h-[55vh] text-[11px] font-mono text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                    {rawText}
+                  </pre>
+                </div>
+              ) : (
+                <div className="p-12 text-center">
+                  <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm font-mono text-muted-foreground">No file preview available.</p>
+                  <p className="text-xs font-mono text-muted-foreground/60 mt-1">Upload a file to see it here.</p>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Report Preview Tab */}
+          <TabsContent value="report" className="flex-1 overflow-auto mt-3">
+            {organizedReport ? (
+              <div className="space-y-4">
+                {/* Consumer Header */}
+                <div className="bg-card border border-primary/20 rounded-lg p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-full bg-primary/10">
+                      <User className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs font-mono text-muted-foreground">Consumer</p>
+                      <h4 className="font-display text-lg text-foreground">{consumerName}</h4>
+                      {organizedReport.personalInformation?.ssn && (
+                        <p className="text-xs font-mono text-muted-foreground">SSN: {organizedReport.personalInformation.ssn}</p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="bg-background border border-border rounded px-3 py-1.5">
+                        <div className="text-lg font-display text-foreground">{tradelineCount}</div>
+                        <div className="text-[10px] font-mono text-muted-foreground">Tradelines</div>
+                      </div>
+                      <div className={`bg-background border rounded px-3 py-1.5 ${issueFlagsDetected > 0 ? "border-destructive/30" : "border-border"}`}>
+                        <div className={`text-lg font-display ${issueFlagsDetected > 0 ? "text-destructive" : "text-foreground"}`}>{issueFlagsDetected}</div>
+                        <div className="text-[10px] font-mono text-muted-foreground">Flags</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Credit Scores */}
+                {scores && (
+                  <div className="bg-card border border-border rounded-lg p-4">
+                    <h5 className="text-xs font-mono font-semibold text-primary mb-3">CREDIT SCORES</h5>
+                    <div className="grid grid-cols-3 gap-3">
+                      {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
+                        const scoreData = scores[bureau];
+                        const score = scoreData?.score;
+                        const scoreColor = !score ? "text-muted-foreground/50"
+                          : score >= 740 ? "text-green-600"
+                          : score >= 670 ? "text-yellow-600"
+                          : score >= 580 ? "text-orange-500"
+                          : "text-destructive";
+                        return (
+                          <div key={bureau} className="text-center bg-background/50 rounded-lg p-3 border border-border">
+                            <p className="text-[10px] font-mono text-muted-foreground">{bureau}</p>
+                            <p className={`text-2xl font-display ${scoreColor}`}>{score ?? "N/A"}</p>
+                            {scoreData?.model && <p className="text-[9px] font-mono text-muted-foreground">{scoreData.model}</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Account Summary */}
+                <div className="bg-card border border-border rounded-lg p-4">
+                  <h5 className="text-xs font-mono font-semibold text-primary mb-3">ACCOUNTS OVERVIEW</h5>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="bg-background/50 rounded-lg p-2.5 text-center border border-border">
+                      <div className="text-lg font-display text-foreground">{accountHistory.length}</div>
+                      <div className="text-[10px] font-mono text-muted-foreground">Account History</div>
+                    </div>
+                    <div className={`bg-background/50 rounded-lg p-2.5 text-center border ${collections.length > 0 ? "border-destructive/30" : "border-border"}`}>
+                      <div className={`text-lg font-display ${collections.length > 0 ? "text-destructive" : "text-foreground"}`}>{collections.length}</div>
+                      <div className="text-[10px] font-mono text-muted-foreground">Collections</div>
+                    </div>
+                    <div className="bg-background/50 rounded-lg p-2.5 text-center border border-border">
+                      <div className="text-lg font-display text-foreground">{publicInfo.length}</div>
+                      <div className="text-[10px] font-mono text-muted-foreground">Public Records</div>
+                    </div>
+                    <div className="bg-background/50 rounded-lg p-2.5 text-center border border-border">
+                      <div className="text-lg font-display text-foreground">{inquiries.length}</div>
+                      <div className="text-[10px] font-mono text-muted-foreground">Inquiries</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Negative Accounts (Collections) */}
+                {collections.length > 0 && (
+                  <div className="bg-card border border-destructive/20 rounded-lg p-4">
+                    <h5 className="text-xs font-mono font-semibold text-destructive mb-3 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      COLLECTION ACCOUNTS ({collections.length})
+                    </h5>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {collections.map((tl: any, i: number) => (
+                        <div key={i} className="bg-background/50 border border-border rounded px-3 py-2 flex items-center justify-between text-xs font-mono">
+                          <div>
+                            <span className="text-foreground font-medium">{tl.creditorName}</span>
+                            {tl.accountNumberMasked && <span className="text-muted-foreground ml-2">#{tl.accountNumberMasked}</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {tl.balance != null && <span className="text-foreground">${tl.balance.toLocaleString()}</span>}
+                            <span className="px-1.5 py-0.5 rounded text-[10px] border border-destructive/30 bg-destructive/10 text-destructive">
+                              {tl.aggregateStatus || "collection"}
+                            </span>
+                            {tl.issueFlags?.length > 0 && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border border-yellow-500/30 bg-yellow-500/10 text-yellow-600">
+                                {tl.issueFlags.length} flag{tl.issueFlags.length !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Derogatory / Negative Account History Items */}
+                {accountHistory.filter((a: any) => ["chargeoff", "late", "derogatory", "collection", "repossession"].includes(a.aggregateStatus)).length > 0 && (
+                  <div className="bg-card border border-yellow-500/20 rounded-lg p-4">
+                    <h5 className="text-xs font-mono font-semibold text-yellow-600 mb-3 flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5" />
+                      NEGATIVE TRADELINES
+                    </h5>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {accountHistory.filter((a: any) => ["chargeoff", "late", "derogatory", "collection", "repossession"].includes(a.aggregateStatus)).map((tl: any, i: number) => (
+                        <div key={i} className="bg-background/50 border border-border rounded px-3 py-2 flex items-center justify-between text-xs font-mono">
+                          <div>
+                            <span className="text-foreground font-medium">{tl.creditorName}</span>
+                            <span className="text-muted-foreground ml-2">{tl.accountType}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {tl.balance != null && <span className="text-foreground">${tl.balance.toLocaleString()}</span>}
+                            <span className="px-1.5 py-0.5 rounded text-[10px] border border-yellow-500/30 bg-yellow-500/10 text-yellow-600">
+                              {tl.aggregateStatus}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Personal Information Summary */}
+                {organizedReport.personalInformation && (
+                  <div className="bg-card border border-border rounded-lg p-4">
+                    <h5 className="text-xs font-mono font-semibold text-primary mb-3">PERSONAL INFORMATION</h5>
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      {organizedReport.personalInformation.name && (
+                        <div className="bg-background/50 rounded px-3 py-2">
+                          <span className="text-muted-foreground">Name:</span>
+                          <span className="text-foreground ml-1">{organizedReport.personalInformation.name}</span>
+                        </div>
+                      )}
+                      {organizedReport.personalInformation.reportDate && (
+                        <div className="bg-background/50 rounded px-3 py-2">
+                          <span className="text-muted-foreground">Report Date:</span>
+                          <span className="text-foreground ml-1">{organizedReport.personalInformation.reportDate}</span>
+                        </div>
+                      )}
+                      {organizedReport.personalInformation.addresses?.length > 0 && (
+                        <div className="bg-background/50 rounded px-3 py-2 col-span-2">
+                          <span className="text-muted-foreground">Address:</span>
+                          <span className="text-foreground ml-1">{organizedReport.personalInformation.addresses[0]?.address}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-12 text-center border border-border rounded-lg">
+                <CreditCard className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-sm font-mono text-muted-foreground">No structured report data available.</p>
+                <p className="text-xs font-mono text-muted-foreground/60 mt-1">Complete the structuring step to see the report preview.</p>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }
 
