@@ -53,6 +53,17 @@ export default function ReviewDashboard() {
     },
   });
 
+  const negAccounts = scan?.negativeAccounts || [];
+  const allViolations = negAccounts.flatMap((a: any) => a.violations || []);
+  const hasNotStartedReview = !scan?.reviewStatus || scan?.reviewStatus === "pending";
+
+  // Auto-start review when violations exist and review hasn't started
+  useEffect(() => {
+    if (scan && hasNotStartedReview && allViolations.length > 0 && !beginReviewMutation.isPending) {
+      beginReviewMutation.mutate();
+    }
+  }, [scan, hasNotStartedReview, allViolations.length]);
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -90,19 +101,9 @@ export default function ReviewDashboard() {
     );
   }
 
-  const negAccounts = scan.negativeAccounts || [];
-  const allViolations = negAccounts.flatMap((a: any) => a.violations || []);
   const isApproved = scan.reviewStatus === "approved" || scan.reviewStatus === "exported";
   const isUnderReview = scan.reviewStatus === "in_progress";
-  const hasNotStartedReview = !scan.reviewStatus || scan.reviewStatus === "pending";
   const allReviewed = summary ? summary.pending === 0 : false;
-
-  // Auto-start review when violations exist and review hasn't started
-  useEffect(() => {
-    if (hasNotStartedReview && allViolations.length > 0 && !beginReviewMutation.isPending) {
-      beginReviewMutation.mutate();
-    }
-  }, [hasNotStartedReview, allViolations.length]);
 
   // Collect unique CRO reminders from debt collector accounts
   const debtCollectorAccounts = negAccounts.filter((a: any) => a.accountType === "debt_collection");

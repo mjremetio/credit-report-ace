@@ -5,13 +5,14 @@ import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
   Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
-  MapPin, Download, ClipboardCheck, Activity, UploadCloud, Database, Pencil
+  MapPin, ClipboardCheck, Activity, UploadCloud, Database
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
-  deleteNegativeAccount, scanAccountForViolations, runManualAnalysisPipeline,
+  deleteNegativeAccount, runManualAnalysisPipeline,
   fetchOrganizedReport, runViolationAnalysis,
 } from "@/lib/api";
+import ViolationReviewCard from "@/components/ViolationReviewCard";
 
 const MANUAL_STEPS = [
   { num: 1, label: "Start", icon: Shield },
@@ -639,49 +640,9 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   });
   const toggleSection = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
-  const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
   const [scanError, setScanError] = useState<string | null>(null);
-  const [scanAllRunning, setScanAllRunning] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
-
-  const scanMutation = useMutation({
-    mutationFn: scanAccountForViolations,
-    onSuccess: (_data, accountId) => {
-      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
-      setScanningIds(prev => { const next = new Set(prev); next.delete(accountId); return next; });
-      setScanError(null);
-    },
-    onError: (err: Error, accountId) => {
-      setScanningIds(prev => { const next = new Set(prev); next.delete(accountId); return next; });
-      setScanError(err.message || "Scan failed. Please try again.");
-    },
-  });
-
-  const handleScan = (accountId: number) => {
-    setScanError(null);
-    setScanningIds(prev => new Set(prev).add(accountId));
-    scanMutation.mutate(accountId);
-  };
-
-  const handleScanAll = async () => {
-    setScanError(null);
-    setScanAllRunning(true);
-    const unscanned = negAccounts.filter((a: any) => a.workflowStep !== "scanned");
-    const ids = unscanned.map((a: any) => a.id);
-    setScanningIds(new Set(ids));
-
-    for (const accountId of ids) {
-      try {
-        await scanAccountForViolations(accountId);
-      } catch (err: any) {
-        setScanError(`Scan failed for one or more accounts. ${err.message || ""}`);
-      }
-      setScanningIds(prev => { const next = new Set(prev); next.delete(accountId); return next; });
-    }
-    queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
-    setScanAllRunning(false);
-  };
 
   // Full pipeline: Use appropriate pipeline based on scan type
   const handleRunPipeline = async () => {
@@ -695,22 +656,18 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         : await runManualAnalysisPipeline(scanId);
       setPipelineResult(result);
       queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
+      // Auto-navigate to review after analysis completes
+      navigate(`/review/${scanId}`);
     } catch (err: any) {
       setScanError(err.message || "Pipeline failed. Please try again.");
     }
     setPipelineRunning(false);
   };
 
-  const completeScan = () => {
-    updateScan(scanId, { status: "completed" }).then(() => {
-      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
-    });
-  };
-
-  const unscannedCount = negAccounts.filter((a: any) => a.workflowStep !== "scanned").length;
   const totalViolationCount = negAccounts.reduce((sum: number, a: any) => sum + (a.violations?.length || 0), 0);
-  const allScanned = unscannedCount === 0 && negAccounts.length > 0;
-  const analysisComplete = allScanned || pipelineResult;
+  const allScanned = negAccounts.length > 0 && negAccounts.every((a: any) => a.workflowStep === "scanned");
+  const hasViolations = negAccounts.some((a: any) => a.violations?.length > 0);
+  const analysisComplete = allScanned || pipelineResult || hasViolations;
 
   // Group violations by category
   const fcraViolations = negAccounts.flatMap((a: any) =>
@@ -719,6 +676,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const debtCollectorViolations = negAccounts.flatMap((a: any) =>
     (a.violations || []).filter((v: any) => v.category && v.category !== "FCRA_REPORTING")
   );
+
+  // Build a map from violation id to the account it belongs to
+  const violationAccountMap = new Map<number, any>();
+  for (const acct of negAccounts) {
+    for (const v of (acct.violations || [])) {
+      violationAccountMap.set(v.id, acct);
+    }
+  }
 
   return (
     <div>
@@ -789,12 +754,8 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                   <ClipboardCheck className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
                 )}
                 <span className={analysisComplete ? "text-primary" : "text-muted-foreground/50"}>
-                  Paralegal manual review — Edit analysis reports
+                  Review & export (auto-redirects after analysis)
                 </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Download className="w-4 h-4 text-muted-foreground/50 flex-shrink-0" />
-                <span className="text-muted-foreground/50">Export (after review & approval)</span>
               </div>
             </>
           )}
@@ -1152,14 +1113,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <h2 className="font-display text-2xl text-foreground mb-2">Analyze & Review</h2>
           <p className="text-muted-foreground font-mono text-sm">
             {analysisComplete
-              ? "Analysis complete. Review violations below, then proceed to paralegal review."
+              ? "Analysis complete. Edit violations below or proceed to review."
               : hasParsedReport
               ? "Report has been uploaded and structured. Run AI violation analysis to scan for FCRA & FDCPA violations."
-              : "Convert manual entries to structured JSON and run AI violation analysis, or scan individual accounts."}
+              : "Convert manual entries to structured JSON and run AI violation analysis."}
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          {!pipelineResult && !allScanned && (
+          {!analysisComplete && (
             <button
               data-testid="button-run-pipeline"
               onClick={handleRunPipeline}
@@ -1170,15 +1131,15 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               {pipelineRunning ? "Running..." : hasParsedReport ? "Run Violation Analysis" : "Run Full Analysis"}
             </button>
           )}
-          {unscannedCount > 0 && !pipelineRunning && (
+          {analysisComplete && (
             <button
-              data-testid="button-scan-all"
-              onClick={handleScanAll}
-              disabled={scanAllRunning}
-              className="px-5 py-2.5 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
+              data-testid="button-rerun-analysis"
+              onClick={handleRunPipeline}
+              disabled={pipelineRunning}
+              className="px-4 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-xs"
             >
-              {scanAllRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-              {scanAllRunning ? "Scanning..." : `Scan Individual (${unscannedCount})`}
+              {pipelineRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+              Re-run Analysis
             </button>
           )}
         </div>
@@ -1229,110 +1190,107 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
       )}
 
-      <div className="space-y-6 mb-8">
-        {negAccounts.map((acct: any) => {
-          const hasViolations = acct.violations && acct.violations.length > 0;
-          const isScanning = scanningIds.has(acct.id);
-          const isScanned = acct.workflowStep === "scanned";
+      {/* Violations grouped by account - editable inline */}
+      {analysisComplete && (
+        <div className="space-y-6 mb-8">
+          {negAccounts.map((acct: any) => {
+            const acctViolations = acct.violations || [];
+            if (acctViolations.length === 0) return null;
 
-          // Split violations by category
-          const acctFcra = (acct.violations || []).filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
-          const acctFdcpa = (acct.violations || []).filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
+            // Split violations by category
+            const acctFcra = acctViolations.filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
+            const acctFdcpa = acctViolations.filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
 
-          return (
-            <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
-              <div className="px-6 py-4 border-b border-border bg-secondary/30 flex items-center justify-between">
-                <div>
+            return (
+              <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-border bg-secondary/30">
                   <h3 className="font-display text-lg text-foreground">{acct.creditor}</h3>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-xs font-mono text-muted-foreground">{formatAccountType(acct.accountType)}</span>
                     {acct.balance && <span className="text-xs font-mono text-foreground">${Number(acct.balance).toLocaleString()}</span>}
-                    <WorkflowBadge step={acct.workflowStep} />
+                    <span className="text-xs font-mono text-muted-foreground">{acctViolations.length} violation{acctViolations.length !== 1 ? "s" : ""}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {!isScanned && (
-                    <button
-                      data-testid={`button-scan-${acct.id}`}
-                      onClick={() => handleScan(acct.id)}
-                      disabled={isScanning || scanAllRunning}
-                      className="px-4 py-2 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-                    >
-                      {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                      {isScanning ? "Scanning..." : "Scan"}
-                    </button>
+
+                <div className="p-6 space-y-4">
+                  {/* FCRA Violations */}
+                  {acctFcra.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-mono text-blue-600 mb-3 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> FCRA REPORTING VIOLATIONS ({acctFcra.length})
+                      </h4>
+                      <div className="space-y-3">
+                        {acctFcra.map((v: any) => (
+                          <ViolationReviewCard
+                            key={v.id}
+                            violation={v}
+                            account={acct}
+                            scanId={scanId}
+                            isLocked={false}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   )}
-                  {isScanned && (
-                    <button
-                      data-testid={`button-rescan-${acct.id}`}
-                      onClick={() => handleScan(acct.id)}
-                      disabled={isScanning || scanAllRunning}
-                      className="px-3 py-1.5 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-xs"
-                    >
-                      {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                      Re-scan
-                    </button>
+
+                  {/* FDCPA Violations */}
+                  {acctFdcpa.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-mono text-purple-600 mb-3 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> DEBT COLLECTOR CONDUCT VIOLATIONS ({acctFdcpa.length})
+                      </h4>
+                      <div className="space-y-3">
+                        {acctFdcpa.map((v: any) => (
+                          <ViolationReviewCard
+                            key={v.id}
+                            violation={v}
+                            account={acct}
+                            scanId={scanId}
+                            isLocked={false}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
+            );
+          })}
+        </div>
+      )}
 
-              <div className="p-6 space-y-4">
-                {isScanning && (
-                  <div className="flex items-center gap-3 py-4 justify-center">
-                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                    <span className="text-sm font-mono text-primary">AI analyzing for FCRA & FDCPA violations...</span>
-                  </div>
-                )}
-
-                {!isScanning && hasViolations && (
-                  <div className="space-y-4">
-                    {/* FCRA Violations */}
-                    {acctFcra.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-mono text-blue-600 mb-3 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" /> FCRA REPORTING VIOLATIONS ({acctFcra.length})
-                        </h4>
-                        <div className="space-y-2">
-                          {acctFcra.map((v: any) => (
-                            <ViolationCard key={v.id} violation={v} scanId={scanId} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* FDCPA Violations */}
-                    {acctFdcpa.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-mono text-purple-600 mb-3 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" /> DEBT COLLECTOR CONDUCT VIOLATIONS ({acctFdcpa.length})
-                        </h4>
-                        <div className="space-y-2">
-                          {acctFdcpa.map((v: any) => (
-                            <ViolationCard key={v.id} violation={v} scanId={scanId} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {!isScanning && isScanned && !hasViolations && (
-                  <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-center">
-                    <CheckCircle2 className="w-5 h-5 text-green-600 mx-auto mb-2" />
-                    <p className="text-sm text-green-600 font-mono">No violations detected for this account.</p>
-                  </div>
-                )}
-
-                {!isScanning && !hasViolations && !isScanned && (
-                  <div className="text-center py-4 text-xs font-mono text-muted-foreground">
-                    Click "Scan" to analyze this account for FCRA & FDCPA violations
-                  </div>
-                )}
+      {/* Accounts without violations after analysis */}
+      {analysisComplete && negAccounts.filter((a: any) => !a.violations?.length).length > 0 && (
+        <div className="mb-8 space-y-3">
+          {negAccounts.filter((a: any) => !a.violations?.length).map((acct: any) => (
+            <div key={acct.id} className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+              <div>
+                <span className="text-sm text-green-600 font-mono font-medium">{acct.creditor}</span>
+                <span className="text-xs font-mono text-green-600/70 ml-2">— No violations detected</span>
               </div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pre-analysis account list */}
+      {!analysisComplete && !pipelineRunning && (
+        <div className="space-y-3 mb-8">
+          {negAccounts.map((acct: any) => (
+            <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-lg p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FileText className="w-4 h-4 text-primary" />
+                <div>
+                  <span className="text-foreground font-medium">{acct.creditor}</span>
+                  <span className="text-xs font-mono text-muted-foreground ml-2">{formatAccountType(acct.accountType)}</span>
+                </div>
+              </div>
+              <span className="text-xs font-mono text-muted-foreground">Pending analysis</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex justify-between">
         <button
@@ -1343,22 +1301,15 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="flex gap-3">
-          {(allScanned || pipelineResult) && (
+          {analysisComplete && (
             <button
               data-testid="button-begin-review"
               onClick={() => navigate(`/review/${scanId}`)}
               className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
             >
-              <ClipboardCheck className="w-4 h-4" /> Paralegal Review
+              <ClipboardCheck className="w-4 h-4" /> Go to Review
             </button>
           )}
-          <button
-            data-testid="button-complete-scan"
-            onClick={completeScan}
-            className="px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors inline-flex items-center gap-2"
-          >
-            <CheckCircle2 className="w-4 h-4" /> Mark Complete
-          </button>
           <button
             data-testid="button-view-profile"
             onClick={() => navigate("/profile")}
@@ -1423,52 +1374,6 @@ function ReportField({ label, value }: { label: string; value: string | null | u
   );
 }
 
-function ViolationCard({ violation, scanId }: { violation: any; scanId: number }) {
-  const [, navigate] = useLocation();
-  const confidenceColors: Record<string, string> = {
-    confirmed: "border-green-500/30 text-green-600 bg-green-500/10",
-    likely: "border-yellow-500/30 text-yellow-600 bg-yellow-500/10",
-    possible: "border-orange-500/30 text-orange-600 bg-orange-500/10",
-  };
-
-  return (
-    <div data-testid={`violation-${violation.id}`} className="bg-background border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <SeverityBadge severity={violation.severity} />
-          <span className="text-sm text-foreground font-semibold">{violation.violationType}</span>
-          {violation.confidence && (
-            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${confidenceColors[violation.confidence] || "border-border text-muted-foreground"}`}>
-              {violation.confidence}
-            </span>
-          )}
-        </div>
-        <button
-          onClick={() => navigate(`/review/${scanId}`)}
-          className="px-3 py-1.5 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-1.5 text-xs flex-shrink-0"
-        >
-          <Pencil className="w-3 h-3" /> Edit Violation Details
-        </button>
-      </div>
-      <p className="text-sm font-mono text-foreground/80 leading-relaxed">{violation.explanation}</p>
-      {violation.evidence && (
-        <p className="text-sm font-mono text-foreground/60 mt-2 italic">Evidence: {violation.evidence}</p>
-      )}
-      {violation.evidenceRequired && (
-        <p className="text-sm font-mono text-yellow-700 dark:text-yellow-500 mt-1">Evidence needed: {violation.evidenceRequired}</p>
-      )}
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <span className="text-sm font-mono font-medium text-primary">{violation.fcraStatute}</span>
-        {violation.matchedRule && (
-          <span className="text-xs font-mono text-foreground/70 bg-secondary px-2 py-1 rounded">{violation.matchedRule}</span>
-        )}
-      </div>
-      {violation.croReminder && (
-        <p className="text-sm font-mono text-yellow-700 dark:text-yellow-500 mt-2 italic">CRO: {violation.croReminder}</p>
-      )}
-    </div>
-  );
-}
 
 function TradelineDetailRow({ tradeline }: { tradeline: any }) {
   const [expanded, setExpanded] = useState(false);
@@ -1726,20 +1631,6 @@ function WorkflowBadge({ step }: { step: string }) {
   return (
     <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colors[step] || colors.pending}`}>
       {step.replace(/_/g, " ")}
-    </span>
-  );
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const colors: Record<string, string> = {
-    critical: "bg-red-500/20 text-red-500 border-red-500/30",
-    high: "bg-orange-500/20 text-orange-500 border-orange-500/30",
-    medium: "bg-yellow-500/20 text-yellow-500 border-yellow-500/30",
-    low: "bg-blue-500/20 text-blue-500 border-blue-500/30",
-  };
-  return (
-    <span className={`px-2.5 py-1 rounded text-xs uppercase font-mono font-semibold border ${colors[severity] || colors.medium}`}>
-      {severity}
     </span>
   );
 }
