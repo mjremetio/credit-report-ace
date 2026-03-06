@@ -5,12 +5,13 @@ import { useParams, useLocation } from "wouter";
 import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
   Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
-  MapPin, ClipboardCheck, Activity, UploadCloud, Database
+  MapPin, ClipboardCheck, Activity, UploadCloud, Database,
+  Bot, PenTool, Save
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
   deleteNegativeAccount, runManualAnalysisPipeline,
-  fetchOrganizedReport, runViolationAnalysis,
+  fetchOrganizedReport, runViolationAnalysis, createManualViolation,
 } from "@/lib/api";
 import ViolationReviewCard from "@/components/ViolationReviewCard";
 
@@ -28,6 +29,34 @@ const UPLOAD_STEPS = [
   { num: 4, label: "Review Data", icon: Eye },
   { num: 5, label: "Violation Analysis", icon: Zap },
   { num: 6, label: "Complete", icon: CheckCircle2 },
+];
+
+type AnalysisMode = "choose" | "ai" | "manual" | null;
+
+const VIOLATION_TYPE_SUGGESTIONS = [
+  "Balance Reporting Error",
+  "Status Conflict",
+  "Date of First Delinquency Inconsistency",
+  "Obsolete Reporting (7+ Years)",
+  "Duplicate Tradeline",
+  "Missing Credit Limit",
+  "Payment History Conflict",
+  "Re-aging Violation",
+  "Cross-Bureau Balance Mismatch",
+  "Post-Bankruptcy Balance Not Zero",
+  "Debt Collector Disclosure Violation",
+  "Cease Contact Violation",
+];
+
+const FCRA_STATUTE_SUGGESTIONS = [
+  "15 U.S.C. § 1681e(b)",
+  "15 U.S.C. § 1681s-2(a)",
+  "15 U.S.C. § 1681s-2(b)",
+  "15 U.S.C. § 1681c(a)",
+  "15 U.S.C. § 1681i",
+  "15 U.S.C. § 1692e",
+  "15 U.S.C. § 1692g",
+  "Cal. Civ. Code § 1785.25(a)",
 ];
 
 const ACCOUNT_TYPES = [
@@ -643,6 +672,43 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const [scanError, setScanError] = useState<string | null>(null);
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(null);
+
+  // Manual violation entry state
+  const emptyViolation = () => ({
+    negativeAccountId: negAccounts[0]?.id || 0,
+    violationType: "",
+    severity: "medium",
+    explanation: "",
+    fcraStatute: "",
+    evidence: "",
+    category: "FCRA_REPORTING",
+    confidence: "confirmed",
+  });
+  const [manualViolations, setManualViolations] = useState([emptyViolation()]);
+  const [manualSaving, setManualSaving] = useState(false);
+
+  const addManualViolationRow = () => setManualViolations(prev => [...prev, emptyViolation()]);
+  const removeManualViolationRow = (idx: number) => setManualViolations(prev => prev.filter((_, i) => i !== idx));
+  const updateManualViolation = (idx: number, field: string, value: string) =>
+    setManualViolations(prev => prev.map((v, i) => i === idx ? { ...v, [field]: value } : v));
+
+  const handleSaveManualViolations = async () => {
+    const valid = manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute && v.negativeAccountId);
+    if (valid.length === 0) return;
+    setManualSaving(true);
+    setScanError(null);
+    try {
+      for (const v of valid) {
+        await createManualViolation(v);
+      }
+      queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
+      navigate(`/review/${scanId}`);
+    } catch (err: any) {
+      setScanError(err.message || "Failed to save violations");
+    }
+    setManualSaving(false);
+  };
 
   // Full pipeline: Use appropriate pipeline based on scan type
   const handleRunPipeline = async () => {
@@ -1108,42 +1174,40 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
       )}
 
+      {/* Analysis Mode Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <h2 className="font-display text-2xl text-foreground mb-2">Analyze & Review</h2>
+          <h2 className="font-display text-2xl text-foreground mb-2">
+            {analysisComplete ? "Analyze & Review" : analysisMode === "manual" ? "Manual Violation Entry" : "Choose Analysis Method"}
+          </h2>
           <p className="text-muted-foreground font-mono text-sm">
             {analysisComplete
               ? "Analysis complete. Edit violations below or proceed to review."
-              : hasParsedReport
-              ? "Report has been uploaded and structured. Run AI violation analysis to scan for FCRA & FDCPA violations."
-              : "Convert manual entries to structured JSON and run AI violation analysis."}
+              : analysisMode === "manual"
+              ? "Add violations you have identified. Each violation will be saved to the scan."
+              : "Select how you want to identify violations in the credit report data."}
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          {!analysisComplete && (
-            <button
-              data-testid="button-run-pipeline"
-              onClick={handleRunPipeline}
-              disabled={pipelineRunning || negAccounts.length === 0}
-              className="px-5 py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-600/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-sm"
-            >
-              {pipelineRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-              {pipelineRunning ? "Running..." : hasParsedReport ? "Run Violation Analysis" : "Run Full Analysis"}
-            </button>
-          )}
           {analysisComplete && (
             <button
               data-testid="button-rerun-analysis"
-              onClick={handleRunPipeline}
-              disabled={pipelineRunning}
-              className="px-4 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50 inline-flex items-center gap-2 text-xs"
+              onClick={() => setAnalysisMode("choose")}
+              className="px-4 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-2 text-xs"
             >
-              {pipelineRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-              Re-run Analysis
+              <Zap className="w-3 h-3" />
+              Re-analyze
             </button>
           )}
         </div>
       </div>
+
+      {scanError && (
+        <div data-testid="scan-error" className="mb-6 bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0" />
+          <p className="text-sm font-mono text-destructive">{scanError}</p>
+        </div>
+      )}
 
       {/* Pipeline running indicator */}
       {pipelineRunning && (
@@ -1155,19 +1219,335 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
           <p className="text-xs font-mono text-muted-foreground">
             {hasParsedReport
               ? `Scanning ${negAccounts.length} negative account(s) for FCRA & FDCPA violations...`
-              : `Converting ${negAccounts.length} account(s) to structured JSON (scores, personal info, bureau summary, tradelines, public records, inquiries, consumer statement), computing issue flags, and running AI violation analysis...`
+              : `Converting ${negAccounts.length} account(s) to structured JSON and running AI violation analysis...`
             }
           </p>
         </div>
       )}
 
-      {scanError && (
-        <div data-testid="scan-error" className="mb-6 bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0" />
-          <p className="text-sm font-mono text-destructive">{scanError}</p>
+      {/* Analysis Mode Chooser - shown when no analysis done yet or re-analyze requested */}
+      {!analysisComplete && !pipelineRunning && analysisMode !== "manual" && (
+        <div className="space-y-4 mb-8">
+          <div className="bg-card border border-primary/30 rounded-xl p-6 text-center">
+            <Shield className="w-10 h-10 text-primary mx-auto mb-3" />
+            <h3 className="font-display text-xl text-foreground mb-2">Choose Violation Analysis Method</h3>
+            <p className="text-sm font-mono text-muted-foreground max-w-lg mx-auto">
+              Select how you want to identify violations for {negAccounts.length} account(s).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* AI Analysis Option */}
+            <button
+              data-testid="button-ai-analysis"
+              onClick={handleRunPipeline}
+              disabled={negAccounts.length === 0}
+              className="bg-card border-2 border-border hover:border-primary/50 rounded-xl p-6 text-left transition-all group disabled:opacity-50"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-3 rounded-full bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                  <Bot className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h4 className="font-display text-lg text-foreground">AI Analysis</h4>
+                  <span className="text-xs font-mono text-primary px-2 py-0.5 rounded bg-primary/10">Recommended</span>
+                </div>
+              </div>
+              <p className="text-sm font-mono text-muted-foreground mb-3">
+                Automatically scan all tradelines for FCRA/FDCPA violations using AI. Detects balance errors, status conflicts, date issues, duplicates, and debt collector conduct violations.
+              </p>
+              <ul className="space-y-1.5 text-xs font-mono text-muted-foreground">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                  Scans all negative tradelines automatically
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                  Cross-bureau comparison and pattern matching
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                  FCRA statute auto-citation
+                </li>
+              </ul>
+              <div className="mt-4 flex items-center gap-2 text-primary font-medium text-sm">
+                <ArrowRight className="w-4 h-4" />
+                {hasParsedReport ? "Run AI Violation Analysis" : "Run Full Analysis Pipeline"}
+              </div>
+            </button>
+
+            {/* Manual Entry Option */}
+            <button
+              data-testid="button-manual-analysis"
+              onClick={() => setAnalysisMode("manual")}
+              disabled={negAccounts.length === 0}
+              className="bg-card border-2 border-border hover:border-primary/50 rounded-xl p-6 text-left transition-all group disabled:opacity-50"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-3 rounded-full bg-yellow-500/10 group-hover:bg-yellow-500/20 transition-colors">
+                  <PenTool className="w-6 h-6 text-yellow-600" />
+                </div>
+                <div>
+                  <h4 className="font-display text-lg text-foreground">Manual Entry</h4>
+                  <span className="text-xs font-mono text-yellow-600 px-2 py-0.5 rounded bg-yellow-500/10">Expert Mode</span>
+                </div>
+              </div>
+              <p className="text-sm font-mono text-muted-foreground mb-3">
+                Manually enter violations based on your own analysis. Ideal for paralegals and credit repair specialists who have identified specific issues.
+              </p>
+              <ul className="space-y-1.5 text-xs font-mono text-muted-foreground">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                  Full control over violation details
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                  Add custom FCRA/FDCPA citations
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                  Violations pre-confirmed for faster review
+                </li>
+              </ul>
+              <div className="mt-4 flex items-center gap-2 text-yellow-600 font-medium text-sm">
+                <ArrowRight className="w-4 h-4" />
+                Enter Violations Manually
+              </div>
+            </button>
+          </div>
         </div>
       )}
 
+      {/* Re-analyze chooser (when analysis already complete and user clicked Re-analyze) */}
+      {analysisComplete && analysisMode === "choose" && !pipelineRunning && (
+        <div className="space-y-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              onClick={() => { setAnalysisMode("ai"); handleRunPipeline(); }}
+              className="bg-card border-2 border-border hover:border-primary/50 rounded-xl p-5 text-left transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <Bot className="w-5 h-5 text-primary" />
+                <div>
+                  <h4 className="font-display text-foreground">Re-run AI Analysis</h4>
+                  <p className="text-xs font-mono text-muted-foreground mt-1">Re-scan all accounts with AI</p>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => setAnalysisMode("manual")}
+              className="bg-card border-2 border-border hover:border-primary/50 rounded-xl p-5 text-left transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <PenTool className="w-5 h-5 text-yellow-600" />
+                <div>
+                  <h4 className="font-display text-foreground">Add Manual Violations</h4>
+                  <p className="text-xs font-mono text-muted-foreground mt-1">Enter violations manually</p>
+                </div>
+              </div>
+            </button>
+          </div>
+          <button
+            onClick={() => setAnalysisMode(null)}
+            className="px-4 py-2 text-muted-foreground font-mono text-xs hover:text-foreground transition-colors inline-flex items-center gap-1"
+          >
+            <ArrowLeft className="w-3 h-3" /> Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Manual Violation Entry Form */}
+      {analysisMode === "manual" && !pipelineRunning && (
+        <div className="space-y-4 mb-8">
+          <div className="bg-card border border-yellow-500/30 rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-lg bg-yellow-500/10">
+                <PenTool className="w-5 h-5 text-yellow-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-display text-lg text-foreground">Manual Violation Entry</h3>
+                <p className="text-xs font-mono text-muted-foreground">
+                  Add violations you have identified in the credit report. Each violation will be saved to the scan.
+                </p>
+              </div>
+              <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-600 bg-yellow-500/10">
+                {manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute).length} valid
+              </span>
+            </div>
+          </div>
+
+          {/* Violation Entry Cards */}
+          <div className="space-y-4">
+            {manualViolations.map((violation, index) => (
+              <div key={index} className="bg-card border border-border rounded-xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-mono font-semibold text-primary">
+                    VIOLATION #{index + 1}
+                  </h4>
+                  {manualViolations.length > 1 && (
+                    <button
+                      onClick={() => removeManualViolationRow(index)}
+                      className="p-1.5 text-destructive/60 hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Account selector */}
+                <div>
+                  <label className="text-xs font-mono text-foreground/60 mb-1 block">Account *</label>
+                  <select
+                    value={violation.negativeAccountId}
+                    onChange={(e) => updateManualViolation(index, "negativeAccountId", e.target.value)}
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                  >
+                    {negAccounts.map((acct: any) => (
+                      <option key={acct.id} value={acct.id}>{acct.creditor} — {formatAccountType(acct.accountType)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">Violation Type *</label>
+                    <input
+                      type="text"
+                      list={`scan-vtype-suggestions-${index}`}
+                      value={violation.violationType}
+                      onChange={(e) => updateManualViolation(index, "violationType", e.target.value)}
+                      placeholder="e.g. Balance Reporting Error"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary placeholder:text-muted-foreground/40"
+                    />
+                    <datalist id={`scan-vtype-suggestions-${index}`}>
+                      {VIOLATION_TYPE_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">Severity *</label>
+                    <select
+                      value={violation.severity}
+                      onChange={(e) => updateManualViolation(index, "severity", e.target.value)}
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                    >
+                      <option value="critical">Critical</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">FCRA/FDCPA Statute *</label>
+                    <input
+                      type="text"
+                      list={`scan-statute-suggestions-${index}`}
+                      value={violation.fcraStatute}
+                      onChange={(e) => updateManualViolation(index, "fcraStatute", e.target.value)}
+                      placeholder="e.g. 15 U.S.C. § 1681e(b)"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary placeholder:text-muted-foreground/40"
+                    />
+                    <datalist id={`scan-statute-suggestions-${index}`}>
+                      {FCRA_STATUTE_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">Category</label>
+                    <select
+                      value={violation.category}
+                      onChange={(e) => updateManualViolation(index, "category", e.target.value)}
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                    >
+                      <option value="FCRA_REPORTING">FCRA Reporting</option>
+                      <option value="DEBT_COLLECTOR_DISCLOSURE">Debt Collector Disclosure</option>
+                      <option value="CA_LICENSE_MISSING">CA License Missing</option>
+                      <option value="CEASE_CONTACT_VIOLATION">Cease Contact Violation</option>
+                      <option value="INCONVENIENT_CONTACT">Inconvenient Contact</option>
+                      <option value="THIRD_PARTY_DISCLOSURE">Third-Party Disclosure</option>
+                      <option value="HARASSMENT_EXCESSIVE_CALLS">Harassment / Excessive Calls</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-mono text-foreground/60 mb-1 block">Explanation *</label>
+                  <textarea
+                    value={violation.explanation}
+                    onChange={(e) => updateManualViolation(index, "explanation", e.target.value)}
+                    rows={2}
+                    placeholder="Describe the violation and why it constitutes a reporting error..."
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary resize-none placeholder:text-muted-foreground/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-mono text-foreground/60 mb-1 block">Evidence</label>
+                  <textarea
+                    value={violation.evidence}
+                    onChange={(e) => updateManualViolation(index, "evidence", e.target.value)}
+                    rows={2}
+                    placeholder="Specific data points or report details that support this violation..."
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary resize-none placeholder:text-muted-foreground/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-mono text-foreground/60 mb-1 block">Confidence</label>
+                  <select
+                    value={violation.confidence}
+                    onChange={(e) => updateManualViolation(index, "confidence", e.target.value)}
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                  >
+                    <option value="confirmed">Confirmed</option>
+                    <option value="likely">Likely</option>
+                    <option value="possible">Possible</option>
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Add More / Save Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={addManualViolationRow}
+              className="px-4 py-2.5 bg-secondary border border-border text-foreground rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Another Violation
+            </button>
+            <button
+              onClick={handleSaveManualViolations}
+              disabled={manualSaving || manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute).length === 0}
+              className="flex-1 px-6 py-2.5 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            >
+              {manualSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save Violations & Go to Review
+                </>
+              )}
+            </button>
+          </div>
+
+          <button
+            onClick={() => setAnalysisMode(null)}
+            className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors font-mono text-sm inline-flex items-center gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Analysis Mode
+          </button>
+        </div>
+      )}
+
+      {/* Violation summary banner */}
       {totalViolationCount > 0 && (
         <div className="mb-6 bg-primary/5 border border-primary/20 rounded-lg p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1183,9 +1563,6 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
             {debtCollectorViolations.length > 0 && (
               <span className="text-purple-600">FDCPA: {debtCollectorViolations.length}</span>
             )}
-            <span className="text-muted-foreground">
-              {analysisComplete ? "All accounts analyzed" : `${negAccounts.length} pending`}
-            </span>
           </div>
         </div>
       )}
@@ -1269,24 +1646,6 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
                 <span className="text-sm text-green-600 font-mono font-medium">{acct.creditor}</span>
                 <span className="text-xs font-mono text-green-600/70 ml-2">— No violations detected</span>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Pre-analysis account list */}
-      {!analysisComplete && !pipelineRunning && (
-        <div className="space-y-3 mb-8">
-          {negAccounts.map((acct: any) => (
-            <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-lg p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <FileText className="w-4 h-4 text-primary" />
-                <div>
-                  <span className="text-foreground font-medium">{acct.creditor}</span>
-                  <span className="text-xs font-mono text-muted-foreground ml-2">{formatAccountType(acct.accountType)}</span>
-                </div>
-              </div>
-              <span className="text-xs font-mono text-muted-foreground">Pending analysis</span>
             </div>
           ))}
         </div>
