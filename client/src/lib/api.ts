@@ -339,6 +339,33 @@ export async function reviewViolation(violationId: number, data: {
   return res.json();
 }
 
+export async function createManualViolation(data: {
+  negativeAccountId: number;
+  violationType: string;
+  severity: string;
+  explanation: string;
+  fcraStatute: string;
+  evidence?: string | null;
+  category?: string | null;
+  evidenceRequired?: string | null;
+  evidenceProvided?: boolean;
+  evidenceNotes?: string | null;
+  confidence?: string;
+  croReminder?: string | null;
+  paralegalNotes?: string | null;
+}) {
+  const res = await fetch("/api/violations/manual", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to create violation");
+  }
+  return res.json();
+}
+
 export async function editViolation(violationId: number, data: Record<string, any>) {
   const res = await fetch(`/api/violations/${violationId}/edit`, {
     method: "PATCH",

@@ -4,24 +4,73 @@ import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   UploadCloud, Activity, Loader2, CheckCircle2, AlertTriangle, FileText,
-  Edit3, ArrowRight, RotateCcw, Eye, Shield, ClipboardCheck, Download,
+  Edit3, ArrowLeft, ArrowRight, RotateCcw, Eye, Shield, ClipboardCheck, Download,
   Type, User, CreditCard, Building, MapPin, Briefcase, Hash,
-  ChevronDown, ChevronUp, Calendar, Code
+  ChevronDown, ChevronUp, Calendar, Code, Plus, Trash2, Bot, PenTool, Save, X
 } from "lucide-react";
 import {
   extractFileText, structureExtractedText, structureUploadFile,
-  runViolationAnalysis, updateScan,
+  runViolationAnalysis, updateScan, createManualViolation,
 } from "@/lib/api";
 
 type InputMode = "file" | "text";
+type AnalysisMode = "ai" | "manual" | null;
 type UploadPhase =
   | "idle"
   | "extracting"
   | "reviewing"
   | "structuring"
   | "structured"
+  | "choosing-analysis"
+  | "manual-violations"
   | "analyzing"
   | "complete";
+
+interface ManualViolationEntry {
+  violationType: string;
+  severity: "critical" | "high" | "medium" | "low";
+  explanation: string;
+  fcraStatute: string;
+  evidence: string;
+  category: string;
+  confidence: "confirmed" | "likely" | "possible";
+}
+
+const EMPTY_VIOLATION: ManualViolationEntry = {
+  violationType: "",
+  severity: "medium",
+  explanation: "",
+  fcraStatute: "",
+  evidence: "",
+  category: "FCRA_REPORTING",
+  confidence: "confirmed",
+};
+
+const VIOLATION_TYPE_SUGGESTIONS = [
+  "Balance Reporting Error",
+  "Status Conflict",
+  "Date of First Delinquency Inconsistency",
+  "Obsolete Reporting (7+ Years)",
+  "Duplicate Tradeline",
+  "Missing Credit Limit",
+  "Payment History Conflict",
+  "Re-aging Violation",
+  "Cross-Bureau Balance Mismatch",
+  "Post-Bankruptcy Balance Not Zero",
+  "Debt Collector Disclosure Violation",
+  "Cease Contact Violation",
+];
+
+const FCRA_STATUTE_SUGGESTIONS = [
+  "15 U.S.C. § 1681e(b)",
+  "15 U.S.C. § 1681s-2(a)",
+  "15 U.S.C. § 1681s-2(b)",
+  "15 U.S.C. § 1681c(a)",
+  "15 U.S.C. § 1681i",
+  "15 U.S.C. § 1692e",
+  "15 U.S.C. § 1692g",
+  "Cal. Civ. Code § 1785.25(a)",
+];
 
 export default function Upload() {
   const [, navigate] = useLocation();
@@ -38,6 +87,12 @@ export default function Upload() {
   const [fileName, setFileName] = useState("");
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [isEdited, setIsEdited] = useState(false);
+
+  // Analysis mode state
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(null);
+  const [manualViolations, setManualViolations] = useState<ManualViolationEntry[]>([{ ...EMPTY_VIOLATION }]);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   // Structured JSON display state
   const [organizedReport, setOrganizedReport] = useState<any>(null);
@@ -58,6 +113,7 @@ export default function Upload() {
     { key: "review", label: "Review Text" },
     { key: "structure", label: "AI Structuring" },
     { key: "review-data", label: "Review Data" },
+    { key: "analysis-mode", label: "Analysis Mode" },
     { key: "violations", label: "Violation Analysis" },
     { key: "complete", label: "Complete" },
   ];
@@ -69,8 +125,10 @@ export default function Upload() {
       case "reviewing": return 1;
       case "structuring": return 2;
       case "structured": return 3;
-      case "analyzing": return 4;
-      case "complete": return 5;
+      case "choosing-analysis": return 4;
+      case "manual-violations": return 5;
+      case "analyzing": return 5;
+      case "complete": return 6;
       default: return 0;
     }
   };
@@ -225,9 +283,93 @@ export default function Upload() {
     structureMutation.mutate({ text: rawText, name: fileName });
   };
 
+  const handleChooseAnalysisMode = () => {
+    setPhase("choosing-analysis");
+  };
+
   const handleProceedToViolations = () => {
     if (structureResult?.scanId) {
+      setAnalysisMode("ai");
       violationMutation.mutate(structureResult.scanId);
+    }
+  };
+
+  const handleProceedToManualViolations = () => {
+    setAnalysisMode("manual");
+    setManualViolations([{ ...EMPTY_VIOLATION }]);
+    setPhase("manual-violations");
+    addLog("MANUAL MODE — Enter violations manually.");
+  };
+
+  const addManualViolationRow = () => {
+    setManualViolations(prev => [...prev, { ...EMPTY_VIOLATION }]);
+  };
+
+  const removeManualViolationRow = (index: number) => {
+    setManualViolations(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateManualViolation = (index: number, field: keyof ManualViolationEntry, value: string) => {
+    setManualViolations(prev => prev.map((v, i) => i === index ? { ...v, [field]: value } : v));
+  };
+
+  const handleSaveManualViolations = async () => {
+    if (!structureResult?.scanId) return;
+    const valid = manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute);
+    if (valid.length === 0) return;
+
+    setManualSaving(true);
+    addLog(`SAVING ${valid.length} manual violation(s)...`);
+
+    try {
+      // We need a negative account to attach violations to.
+      // Use the first account from the scan or the selected one.
+      const scanRes = await fetch(`/api/scans/${structureResult.scanId}`);
+      const scanData = await scanRes.json();
+      const negAccounts = scanData.negativeAccounts || [];
+
+      let targetAccountId = selectedAccountId;
+      if (!targetAccountId && negAccounts.length > 0) {
+        targetAccountId = negAccounts[0].id;
+      }
+
+      // If no accounts exist, create a placeholder one
+      if (!targetAccountId) {
+        const createRes = await fetch(`/api/scans/${structureResult.scanId}/accounts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            creditor: "Manual Entry",
+            accountType: "debt_collection",
+          }),
+        });
+        const created = await createRes.json();
+        targetAccountId = created.id;
+      }
+
+      let savedCount = 0;
+      for (const v of valid) {
+        await createManualViolation({
+          negativeAccountId: targetAccountId!,
+          violationType: v.violationType,
+          severity: v.severity,
+          explanation: v.explanation,
+          fcraStatute: v.fcraStatute,
+          evidence: v.evidence || null,
+          category: v.category || "FCRA_REPORTING",
+          confidence: v.confidence || "confirmed",
+        });
+        savedCount++;
+      }
+
+      addLog(`SAVED: ${savedCount} violation(s) created successfully.`);
+      setViolationResult({ violationsFound: savedCount });
+      setPhase("complete");
+    } catch (err: any) {
+      addLog(`ERROR: ${err.message}`);
+      setError(err.message);
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -242,6 +384,10 @@ export default function Upload() {
     setOriginalFile(null);
     setIsEdited(false);
     setOrganizedReport(null);
+    setAnalysisMode(null);
+    setManualViolations([{ ...EMPTY_VIOLATION }]);
+    setManualSaving(false);
+    setSelectedAccountId(null);
     setExpandedSections({
       personalInfo: true,
       scores: true,
@@ -621,16 +767,64 @@ export default function Upload() {
               </div>
 
               {/* Summary Stats */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
                   <div className="text-2xl font-display text-foreground">{structureResult.tradelineCount}</div>
                   <div className="text-xs font-mono text-muted-foreground mt-1">Tradelines</div>
                 </div>
-                <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
-                  <div className="text-2xl font-display text-foreground">{structureResult.issueFlagsDetected || 0}</div>
+                <div className={`bg-background/50 border rounded-lg p-3 text-center ${
+                  (structureResult.issueFlagsDetected || 0) > 0
+                    ? "border-destructive/30"
+                    : "border-border"
+                }`}>
+                  <div className={`text-2xl font-display ${
+                    (structureResult.issueFlagsDetected || 0) > 0 ? "text-destructive" : "text-foreground"
+                  }`}>{structureResult.issueFlagsDetected || 0}</div>
                   <div className="text-xs font-mono text-muted-foreground mt-1">Issue Flags</div>
                 </div>
+                <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
+                  <div className="text-2xl font-display text-foreground">
+                    {structureResult.summary?.publicRecordCount || organizedReport?.publicInformation?.length || 0}
+                  </div>
+                  <div className="text-xs font-mono text-muted-foreground mt-1">Public Records</div>
+                </div>
+                <div className="bg-background/50 border border-border rounded-lg p-3 text-center">
+                  <div className="text-2xl font-display text-foreground">
+                    {structureResult.summary?.inquiryCount || organizedReport?.inquiries?.length || 0}
+                  </div>
+                  <div className="text-xs font-mono text-muted-foreground mt-1">Inquiries</div>
+                </div>
               </div>
+
+              {/* Issue Flags Alert */}
+              {(structureResult.issueFlagsDetected || 0) > 0 && (
+                <div className="bg-destructive/5 border border-destructive/20 rounded-lg p-3 mt-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertTriangle className="w-4 h-4 text-destructive" />
+                    <span className="text-sm font-mono font-medium text-destructive">
+                      {structureResult.issueFlagsDetected} Issue Flag{structureResult.issueFlagsDetected !== 1 ? "s" : ""} Detected
+                    </span>
+                  </div>
+                  <p className="text-xs font-mono text-muted-foreground">
+                    Potential reporting errors have been identified in the structured data. Proceed to violation analysis to review them in detail.
+                  </p>
+                </div>
+              )}
+
+              {/* Negative Tradeline Highlight */}
+              {organizedReport?.collections?.length > 0 && (
+                <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3 mt-2">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-yellow-600" />
+                    <span className="text-sm font-mono font-medium text-yellow-600">
+                      {organizedReport.collections.length} Collection Account{organizedReport.collections.length !== 1 ? "s" : ""} Found
+                    </span>
+                  </div>
+                  <p className="text-xs font-mono text-muted-foreground mt-1">
+                    These accounts may contain FCRA/FDCPA violations. Review the data and proceed to analysis.
+                  </p>
+                </div>
+              )}
 
               <p className="text-xs font-mono text-muted-foreground mt-3 text-center">
                 Structured JSON created. Review the data below, then proceed to violation analysis.
@@ -729,14 +923,33 @@ export default function Upload() {
                   <div className="grid grid-cols-3 gap-3">
                     {(["TransUnion", "Experian", "Equifax"] as const).map(bureau => {
                       const scoreData = organizedReport.creditScores?.[bureau];
+                      const score = scoreData?.score;
+                      const scoreColor = !score ? "text-muted-foreground/50"
+                        : score >= 740 ? "text-green-600"
+                        : score >= 670 ? "text-yellow-600"
+                        : score >= 580 ? "text-orange-500"
+                        : "text-destructive";
+                      const scoreLabel = !score ? null
+                        : score >= 740 ? "Excellent"
+                        : score >= 670 ? "Good"
+                        : score >= 580 ? "Fair"
+                        : "Poor";
+                      const scoreBorder = !score ? "border-border"
+                        : score >= 740 ? "border-green-500/30"
+                        : score >= 670 ? "border-yellow-500/30"
+                        : score >= 580 ? "border-orange-500/30"
+                        : "border-destructive/30";
                       return (
-                        <div key={bureau} className="bg-background/30 border border-border rounded-lg p-4 text-center">
+                        <div key={bureau} className={`bg-background/30 border rounded-lg p-4 text-center ${scoreBorder}`}>
                           <p className="text-xs font-mono text-muted-foreground mb-1">{bureau}</p>
-                          <p className={`text-3xl font-display ${scoreData?.score ? "text-foreground" : "text-muted-foreground/50"}`}>
-                            {scoreData?.score ?? "N/A"}
+                          <p className={`text-3xl font-display ${scoreColor}`}>
+                            {score ?? "N/A"}
                           </p>
+                          {scoreLabel && (
+                            <p className={`text-[10px] font-mono font-medium mt-1 ${scoreColor}`}>{scoreLabel}</p>
+                          )}
                           {scoreData?.model && (
-                            <p className="text-[10px] font-mono text-muted-foreground mt-1">{scoreData.model}</p>
+                            <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{scoreData.model}</p>
                           )}
                         </div>
                       );
@@ -927,12 +1140,12 @@ export default function Upload() {
             {/* Action Buttons */}
             <div className="flex gap-3 pt-2">
               <button
-                data-testid="button-run-violations"
-                onClick={handleProceedToViolations}
+                data-testid="button-choose-analysis"
+                onClick={handleChooseAnalysisMode}
                 className="flex-1 px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
               >
                 <Shield className="w-4 h-4" />
-                Run Violation Analysis
+                Proceed to Violation Analysis
               </button>
               <button
                 data-testid="button-start-over-structured"
@@ -941,6 +1154,301 @@ export default function Upload() {
               >
                 <RotateCcw className="w-4 h-4" />
                 Start Over
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── CHOOSING ANALYSIS MODE ── */}
+        {phase === "choosing-analysis" && structureResult && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="bg-card border border-primary/30 rounded-xl p-6 text-center">
+              <Shield className="w-10 h-10 text-primary mx-auto mb-3" />
+              <h3 className="font-display text-xl text-foreground mb-2">Choose Violation Analysis Method</h3>
+              <p className="text-sm font-mono text-muted-foreground max-w-lg mx-auto">
+                Select how you want to identify violations in the structured credit report data.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* AI Analysis Option */}
+              <button
+                data-testid="button-ai-analysis"
+                onClick={handleProceedToViolations}
+                className="bg-card border-2 border-border hover:border-primary/50 rounded-xl p-6 text-left transition-all group"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-3 rounded-full bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                    <Bot className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-lg text-foreground">AI Analysis</h4>
+                    <span className="text-xs font-mono text-primary px-2 py-0.5 rounded bg-primary/10">Recommended</span>
+                  </div>
+                </div>
+                <p className="text-sm font-mono text-muted-foreground mb-3">
+                  Automatically scan all tradelines for FCRA/FDCPA violations using AI. Detects balance errors, status conflicts, date issues, duplicates, and debt collector conduct violations.
+                </p>
+                <ul className="space-y-1.5 text-xs font-mono text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    Scans all negative tradelines automatically
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    Cross-bureau comparison and pattern matching
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    FCRA statute auto-citation
+                  </li>
+                </ul>
+                <div className="mt-4 flex items-center gap-2 text-primary font-medium text-sm">
+                  <ArrowRight className="w-4 h-4" />
+                  Run AI Violation Analysis
+                </div>
+              </button>
+
+              {/* Manual Entry Option */}
+              <button
+                data-testid="button-manual-analysis"
+                onClick={handleProceedToManualViolations}
+                className="bg-card border-2 border-border hover:border-primary/50 rounded-xl p-6 text-left transition-all group"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-3 rounded-full bg-yellow-500/10 group-hover:bg-yellow-500/20 transition-colors">
+                    <PenTool className="w-6 h-6 text-yellow-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-lg text-foreground">Manual Entry</h4>
+                    <span className="text-xs font-mono text-yellow-600 px-2 py-0.5 rounded bg-yellow-500/10">Expert Mode</span>
+                  </div>
+                </div>
+                <p className="text-sm font-mono text-muted-foreground mb-3">
+                  Manually enter violations based on your own analysis. Ideal for paralegals and credit repair specialists who have identified specific issues.
+                </p>
+                <ul className="space-y-1.5 text-xs font-mono text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                    Full control over violation details
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                    Add custom FCRA/FDCPA citations
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
+                    Violations pre-confirmed for faster review
+                  </li>
+                </ul>
+                <div className="mt-4 flex items-center gap-2 text-yellow-600 font-medium text-sm">
+                  <ArrowRight className="w-4 h-4" />
+                  Enter Violations Manually
+                </div>
+              </button>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPhase("structured")}
+                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors font-mono text-sm inline-flex items-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to Review Data
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── MANUAL VIOLATIONS ENTRY ── */}
+        {phase === "manual-violations" && structureResult && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="bg-card border border-yellow-500/30 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-lg bg-yellow-500/10">
+                  <PenTool className="w-5 h-5 text-yellow-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-display text-lg text-foreground">Manual Violation Entry</h3>
+                  <p className="text-xs font-mono text-muted-foreground">
+                    Add violations you have identified in the credit report. Each violation will be saved to the scan.
+                  </p>
+                </div>
+                <span className="text-xs font-mono px-2 py-1 rounded border border-yellow-500/30 text-yellow-600 bg-yellow-500/10">
+                  {manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute).length} valid
+                </span>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0" />
+                <p className="text-sm font-mono text-destructive">{error}</p>
+              </div>
+            )}
+
+            {/* Violation Entry Cards */}
+            <div className="space-y-4">
+              {manualViolations.map((violation, index) => (
+                <div key={index} className="bg-card border border-border rounded-xl p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-mono font-semibold text-primary">
+                      VIOLATION #{index + 1}
+                    </h4>
+                    {manualViolations.length > 1 && (
+                      <button
+                        onClick={() => removeManualViolationRow(index)}
+                        className="p-1.5 text-destructive/60 hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="md:col-span-2">
+                      <label className="text-xs font-mono text-foreground/60 mb-1 block">Violation Type *</label>
+                      <input
+                        type="text"
+                        list={`vtype-suggestions-${index}`}
+                        value={violation.violationType}
+                        onChange={(e) => updateManualViolation(index, "violationType", e.target.value)}
+                        placeholder="e.g. Balance Reporting Error"
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary placeholder:text-muted-foreground/40"
+                      />
+                      <datalist id={`vtype-suggestions-${index}`}>
+                        {VIOLATION_TYPE_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className="text-xs font-mono text-foreground/60 mb-1 block">Severity *</label>
+                      <select
+                        value={violation.severity}
+                        onChange={(e) => updateManualViolation(index, "severity", e.target.value)}
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                      >
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-mono text-foreground/60 mb-1 block">FCRA/FDCPA Statute *</label>
+                      <input
+                        type="text"
+                        list={`statute-suggestions-${index}`}
+                        value={violation.fcraStatute}
+                        onChange={(e) => updateManualViolation(index, "fcraStatute", e.target.value)}
+                        placeholder="e.g. 15 U.S.C. § 1681e(b)"
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary placeholder:text-muted-foreground/40"
+                      />
+                      <datalist id={`statute-suggestions-${index}`}>
+                        {FCRA_STATUTE_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className="text-xs font-mono text-foreground/60 mb-1 block">Category</label>
+                      <select
+                        value={violation.category}
+                        onChange={(e) => updateManualViolation(index, "category", e.target.value)}
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                      >
+                        <option value="FCRA_REPORTING">FCRA Reporting</option>
+                        <option value="DEBT_COLLECTOR_DISCLOSURE">Debt Collector Disclosure</option>
+                        <option value="CA_LICENSE_MISSING">CA License Missing</option>
+                        <option value="CEASE_CONTACT_VIOLATION">Cease Contact Violation</option>
+                        <option value="INCONVENIENT_CONTACT">Inconvenient Contact</option>
+                        <option value="THIRD_PARTY_DISCLOSURE">Third-Party Disclosure</option>
+                        <option value="HARASSMENT_EXCESSIVE_CALLS">Harassment / Excessive Calls</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">Explanation *</label>
+                    <textarea
+                      value={violation.explanation}
+                      onChange={(e) => updateManualViolation(index, "explanation", e.target.value)}
+                      rows={2}
+                      placeholder="Describe the violation and why it constitutes a reporting error..."
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary resize-none placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">Evidence</label>
+                    <textarea
+                      value={violation.evidence}
+                      onChange={(e) => updateManualViolation(index, "evidence", e.target.value)}
+                      rows={2}
+                      placeholder="Specific data points or report details that support this violation..."
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary resize-none placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-mono text-foreground/60 mb-1 block">Confidence</label>
+                    <select
+                      value={violation.confidence}
+                      onChange={(e) => updateManualViolation(index, "confidence", e.target.value)}
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground font-mono text-sm focus:outline-none focus:border-primary appearance-none"
+                    >
+                      <option value="confirmed">Confirmed</option>
+                      <option value="likely">Likely</option>
+                      <option value="possible">Possible</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Add More / Save Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={addManualViolationRow}
+                className="px-4 py-2.5 bg-secondary border border-border text-foreground rounded-lg hover:bg-secondary/80 transition-colors font-mono text-sm inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add Another Violation
+              </button>
+              <button
+                onClick={handleSaveManualViolations}
+                disabled={manualSaving || manualViolations.filter(v => v.violationType && v.explanation && v.fcraStatute).length === 0}
+                className="flex-1 px-6 py-2.5 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {manualSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Violations & Complete
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPhase("choosing-analysis")}
+                className="px-6 py-3 bg-secondary border border-border text-muted-foreground rounded-lg hover:text-foreground transition-colors font-mono text-sm inline-flex items-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to Analysis Mode
               </button>
             </div>
           </motion.div>
@@ -1356,7 +1864,14 @@ function TradelineRow({ tradeline }: { tradeline: any }) {
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center justify-between mb-1">
-          <span className="text-foreground font-medium">{tradeline.creditorName}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-foreground font-medium">{tradeline.creditorName}</span>
+            {tradeline.issueFlags?.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border border-destructive/30 bg-destructive/10 text-destructive">
+                {tradeline.issueFlags.length} flag{tradeline.issueFlags.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <span className={`px-1.5 py-0.5 rounded text-[10px] border ${statusClass}`}>
               {tradeline.aggregateStatus}
@@ -1523,6 +2038,28 @@ function TradelineRow({ tradeline }: { tradeline: any }) {
               </div>
             );
           })}
+
+          {/* Issue Flags for this tradeline */}
+          {tradeline.issueFlags?.length > 0 && (
+            <div className="mt-3 bg-destructive/5 border border-destructive/20 rounded-lg p-2.5">
+              <p className="text-[10px] font-mono text-destructive font-semibold mb-1.5">ISSUE FLAGS</p>
+              <div className="space-y-1">
+                {tradeline.issueFlags.map((flag: any, fi: number) => (
+                  <div key={fi} className="flex items-start gap-2 text-[10px] font-mono">
+                    <span className={`px-1 py-0.5 rounded border flex-shrink-0 ${
+                      flag.severity === "critical" ? "border-red-500/30 bg-red-500/10 text-red-500" :
+                      flag.severity === "high" ? "border-orange-500/30 bg-orange-500/10 text-orange-500" :
+                      flag.severity === "medium" ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-500" :
+                      "border-blue-500/30 bg-blue-500/10 text-blue-500"
+                    }`}>
+                      {flag.severity || "info"}
+                    </span>
+                    <span className="text-foreground/80">{flag.message || flag.type}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
