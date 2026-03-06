@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { NegativeAccount } from "@shared/schema";
+import type { NegativeAccount, ViolationPattern } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -7,6 +7,9 @@ const openai = new OpenAI({
   timeout: 300_000, // 5 minutes per request
   maxRetries: 2,
 });
+
+// Use higher-capability model for more accurate violation detection
+const VIOLATION_MODEL = "o3";
 
 export interface DetectedViolation {
   violationType: string;
@@ -271,23 +274,46 @@ Return ONLY valid JSON:
   ]
 }`;
 
-export async function detectViolations(account: NegativeAccount, clientState?: string | null): Promise<DetectedViolation[]> {
+export async function detectViolations(account: NegativeAccount, clientState?: string | null, learnedPatterns?: ViolationPattern[]): Promise<DetectedViolation[]> {
   const accountDetails = buildAccountDescription(account, clientState);
 
   // Use compact prompt when rule-based flags are already present (saves ~40% tokens)
   const hasRuleFlags = account.rawDetails?.includes("RULE-BASED FLAGS") || account.rawDetails?.includes("Rule-Based Flags:");
-  const systemPrompt = hasRuleFlags ? VIOLATION_COMPACT_PROMPT : VIOLATION_SYSTEM_PROMPT;
+  let systemPrompt = hasRuleFlags ? VIOLATION_COMPACT_PROMPT : VIOLATION_SYSTEM_PROMPT;
+
+  // Inject learned violation patterns to enhance scanning accuracy
+  if (learnedPatterns && learnedPatterns.length > 0) {
+    const relevantPatterns = learnedPatterns
+      .filter(p => p.accountType === account.accountType && p.timesConfirmed > p.timesRejected)
+      .slice(0, 20); // Top 20 most confirmed patterns
+
+    if (relevantPatterns.length > 0) {
+      const patternLines = relevantPatterns.map(p =>
+        `- ${p.violationType} (${p.severity}, confirmed ${p.timesConfirmed}x): ${p.matchedRule || "N/A"} | ${p.fcraStatute || ""} | Evidence pattern: ${p.evidencePattern || "N/A"}`
+      ).join("\n");
+
+      systemPrompt += `\n\n## LEARNED VIOLATION PATTERNS (from previously confirmed reviews)
+The following violation patterns have been confirmed by human reviewers on similar ${formatAccountType(account.accountType)} accounts. Prioritize checking for these patterns as they have high accuracy:
+${patternLines}
+
+Use these patterns to:
+1. Prioritize checking for violations that have been frequently confirmed
+2. Increase confidence level when you find violations matching these patterns
+3. Apply similar evidence standards that led to previous confirmations
+4. Flag violations matching these patterns with higher severity when evidence is strong`;
+    }
+  }
 
   let response;
   try {
     response = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: VIOLATION_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations:\n\n${accountDetails}` }
+        { role: "user", content: `Analyze this negative credit account for potential FCRA and FDCPA violations. Be thorough and precise — check EVERY rule systematically. Cross-reference all per-bureau data for discrepancies. For each violation found, provide specific evidence from the account data.\n\n${accountDetails}` }
       ],
       response_format: { type: "json_object" },
-      max_completion_tokens: 8192,
+      max_completion_tokens: 16384,
     });
   } catch (err: any) {
     console.error("AI service error during violation detection:", err?.message || err);

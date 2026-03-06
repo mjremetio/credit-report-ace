@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
@@ -97,6 +97,13 @@ export default function ReviewDashboard() {
   const hasNotStartedReview = !scan.reviewStatus || scan.reviewStatus === "pending";
   const allReviewed = summary ? summary.pending === 0 : false;
 
+  // Auto-start review when violations exist and review hasn't started
+  useEffect(() => {
+    if (hasNotStartedReview && allViolations.length > 0 && !beginReviewMutation.isPending) {
+      beginReviewMutation.mutate();
+    }
+  }, [hasNotStartedReview, allViolations.length]);
+
   // Collect unique CRO reminders from debt collector accounts
   const debtCollectorAccounts = negAccounts.filter((a: any) => a.accountType === "debt_collection");
   const customReminders = allViolations
@@ -164,24 +171,18 @@ export default function ReviewDashboard() {
           </motion.div>
         )}
 
-        {/* Begin Review state */}
+        {/* Auto-starting review indicator */}
         {hasNotStartedReview && allViolations.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-primary/5 border border-primary/20 rounded-xl p-6 text-center"
           >
-            <Shield className="w-10 h-10 text-primary mx-auto mb-3" />
-            <h3 className="font-display text-lg text-foreground mb-2">Ready for Review</h3>
-            <p className="text-sm font-mono text-muted-foreground mb-4">
-              {allViolations.length} violation{allViolations.length !== 1 ? "s" : ""} detected across {negAccounts.filter((a: any) => (a.violations || []).length > 0).length} account{negAccounts.filter((a: any) => (a.violations || []).length > 0).length !== 1 ? "s" : ""}. Review each violation to validate AI findings before export.
+            <Loader2 className="w-10 h-10 text-primary mx-auto mb-3 animate-spin" />
+            <h3 className="font-display text-lg text-foreground mb-2">Starting Review...</h3>
+            <p className="text-sm font-mono text-muted-foreground">
+              {allViolations.length} violation{allViolations.length !== 1 ? "s" : ""} detected. Automatically initializing review...
             </p>
-            <button
-              onClick={() => beginReviewMutation.mutate()}
-              className="px-6 py-3 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
-            >
-              <Shield className="w-4 h-4" /> Begin Review
-            </button>
           </motion.div>
         )}
 
@@ -197,12 +198,12 @@ export default function ReviewDashboard() {
         )}
 
         {/* Review Progress */}
-        {(isUnderReview || isApproved) && allViolations.length > 0 && (
+        {(isUnderReview || isApproved || hasNotStartedReview) && allViolations.length > 0 && (
           <ReviewProgressBar scanId={scanId} />
         )}
 
         {/* Reviewer Name (for tracking) */}
-        {isUnderReview && (
+        {(isUnderReview || hasNotStartedReview) && allViolations.length > 0 && (
           <div className="bg-card border border-border rounded-xl p-4">
             <label className="text-xs font-mono text-muted-foreground mb-1 block">Reviewer Name</label>
             <input
@@ -216,7 +217,7 @@ export default function ReviewDashboard() {
         )}
 
         {/* FCRA Violations Section */}
-        {fcraViolations.length > 0 && (isUnderReview || isApproved) && (
+        {fcraViolations.length > 0 && (isUnderReview || isApproved || hasNotStartedReview) && (
           <div>
             <h3 className="font-display text-lg text-foreground mb-4 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-blue-600" />
@@ -238,7 +239,7 @@ export default function ReviewDashboard() {
         )}
 
         {/* FDCPA Violations Section */}
-        {fdcpaViolations.length > 0 && (isUnderReview || isApproved) && (
+        {fdcpaViolations.length > 0 && (isUnderReview || isApproved || hasNotStartedReview) && (
           <div>
             <h3 className="font-display text-lg text-foreground mb-4 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-purple-600" />
@@ -260,12 +261,12 @@ export default function ReviewDashboard() {
         )}
 
         {/* Evidence Tracker */}
-        {(isUnderReview || isApproved) && allViolations.length > 0 && (
+        {(isUnderReview || isApproved || hasNotStartedReview) && allViolations.length > 0 && (
           <EvidenceTracker violations={allViolations} />
         )}
 
         {/* CRO Reminders for debt collector accounts */}
-        {isUnderReview && debtCollectorAccounts.map((acct: any) => (
+        {(isUnderReview || hasNotStartedReview) && debtCollectorAccounts.map((acct: any) => (
           <CROReminders
             key={acct.id}
             accountCreditor={acct.creditor}
