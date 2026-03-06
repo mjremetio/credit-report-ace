@@ -14,6 +14,12 @@ import {
   fetchOrganizedReport, runViolationAnalysis, createManualViolation,
 } from "@/lib/api";
 import ViolationReviewCard from "@/components/ViolationReviewCard";
+import {
+  AlertDialog, AlertDialogTrigger, AlertDialogContent,
+  AlertDialogHeader, AlertDialogFooter, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { buttonVariants } from "@/components/ui/button";
 
 const MANUAL_STEPS = [
   { num: 1, label: "Start", icon: Shield },
@@ -433,13 +439,33 @@ function Step2AddAccounts({ scan, scanId, goToStep }: { scan: any; scanId: numbe
                   </div>
                 </div>
               </div>
-              <button
-                data-testid={`delete-account-${acct.id}`}
-                onClick={() => deleteMutation.mutate(acct.id)}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-2"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button
+                    data-testid={`delete-account-${acct.id}`}
+                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Account</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete the account for <strong>{acct.creditor}</strong>? This will remove the account and any associated violation analysis.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className={buttonVariants({ variant: "destructive" })}
+                      onClick={() => deleteMutation.mutate(acct.id)}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           ))}
         </div>
