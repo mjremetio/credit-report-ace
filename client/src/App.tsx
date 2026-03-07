@@ -10,6 +10,7 @@ import Upload from "@/pages/Upload";
 import ScanWizard from "@/pages/ScanWizard";
 import ReviewDashboard from "@/pages/ReviewDashboard";
 import ProfileView from "@/pages/ProfileView";
+import FcraTraining from "@/pages/FcraTraining";
 
 function Router() {
   return (
@@ -20,6 +21,7 @@ function Router() {
         <Route path="/scan/:id" component={ScanWizard} />
         <Route path="/review/:id" component={ReviewDashboard} />
         <Route path="/profile" component={ProfileView} />
+        <Route path="/training" component={FcraTraining} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

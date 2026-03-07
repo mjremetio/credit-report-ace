@@ -542,10 +542,11 @@ export async function registerRoutes(
 
       await storage.clearViolationsByAccount(id);
 
-      // Fetch learned patterns for this account type to enhance scanning accuracy
+      // Fetch learned patterns and training examples for this account type to enhance scanning accuracy
       const learnedPatterns = await storage.getViolationPatternsByAccountType(account.accountType);
+      const trainingExamples = await storage.getActiveTrainingExamples();
 
-      const detectedViolations = await detectViolations(account, clientState, learnedPatterns);
+      const detectedViolations = await detectViolations(account, clientState, learnedPatterns, trainingExamples);
       const savedViolations = [];
       for (const v of detectedViolations) {
         const saved = await storage.createViolation({
@@ -1428,6 +1429,176 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching violation patterns:", error);
       res.status(500).json({ error: "Failed to fetch violation patterns" });
+    }
+  });
+
+  // ========== FCRA AI TRAINING ENDPOINTS ==========
+
+  const createTrainingExampleSchema = z.object({
+    violationType: z.string().min(1, "violationType is required"),
+    category: z.string().min(1, "category is required"),
+    severity: z.enum(["critical", "high", "medium", "low"]),
+    fcraStatute: z.string().min(1, "fcraStatute is required"),
+    accountType: z.enum(["debt_collection", "charge_off", "repossession"]),
+    title: z.string().min(1, "title is required"),
+    scenario: z.string().min(10, "scenario must be at least 10 characters"),
+    expectedEvidence: z.string().min(5, "expectedEvidence is required"),
+    expectedExplanation: z.string().min(10, "expectedExplanation is required"),
+    reportExcerpt: z.string().optional().nullable(),
+    commonMistakes: z.string().optional().nullable(),
+    keyIndicators: z.string().optional().nullable(),
+    caseLawReference: z.string().optional().nullable(),
+    regulatoryGuidance: z.string().optional().nullable(),
+    isActive: z.boolean().optional(),
+    source: z.string().optional().nullable(),
+    sourceScanId: z.number().int().optional().nullable(),
+    createdBy: z.string().optional().nullable(),
+  });
+
+  const updateTrainingExampleSchema = createTrainingExampleSchema.partial();
+
+  // GET /api/training/examples — Get all training examples
+  app.get("/api/training/examples", async (_req, res) => {
+    try {
+      const examples = await storage.getAllTrainingExamples();
+      res.json(examples);
+    } catch (error) {
+      console.error("Error fetching training examples:", error);
+      res.status(500).json({ error: "Failed to fetch training examples" });
+    }
+  });
+
+  // GET /api/training/stats — Get training data statistics
+  app.get("/api/training/stats", async (_req, res) => {
+    try {
+      const stats = await storage.getTrainingStats();
+      const patterns = await storage.getAllViolationPatterns();
+      res.json({
+        ...stats,
+        learnedPatterns: patterns.length,
+        confirmedPatterns: patterns.filter(p => p.timesConfirmed > p.timesRejected).length,
+      });
+    } catch (error) {
+      console.error("Error fetching training stats:", error);
+      res.status(500).json({ error: "Failed to fetch training stats" });
+    }
+  });
+
+  // GET /api/training/examples/:id — Get a single training example
+  app.get("/api/training/examples/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      const example = await storage.getTrainingExample(id);
+      if (!example) return res.status(404).json({ error: "Training example not found" });
+      res.json(example);
+    } catch (error) {
+      console.error("Error fetching training example:", error);
+      res.status(500).json({ error: "Failed to fetch training example" });
+    }
+  });
+
+  // POST /api/training/examples — Create a new training example
+  app.post("/api/training/examples", async (req, res) => {
+    try {
+      const parsed = createTrainingExampleSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid input" });
+
+      const example = await storage.createTrainingExample({
+        ...parsed.data,
+        reportExcerpt: parsed.data.reportExcerpt || null,
+        commonMistakes: parsed.data.commonMistakes || null,
+        keyIndicators: parsed.data.keyIndicators || null,
+        caseLawReference: parsed.data.caseLawReference || null,
+        regulatoryGuidance: parsed.data.regulatoryGuidance || null,
+        isActive: parsed.data.isActive ?? true,
+        source: parsed.data.source || "manual",
+        sourceScanId: parsed.data.sourceScanId || null,
+        createdBy: parsed.data.createdBy || null,
+      });
+      res.json(example);
+    } catch (error) {
+      console.error("Error creating training example:", error);
+      res.status(500).json({ error: "Failed to create training example" });
+    }
+  });
+
+  // PATCH /api/training/examples/:id — Update a training example
+  app.patch("/api/training/examples/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      const parsed = updateTrainingExampleSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid input" });
+
+      const updated = await storage.updateTrainingExample(id, parsed.data);
+      if (!updated) return res.status(404).json({ error: "Training example not found" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating training example:", error);
+      res.status(500).json({ error: "Failed to update training example" });
+    }
+  });
+
+  // DELETE /api/training/examples/:id — Delete a training example
+  app.delete("/api/training/examples/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      await storage.deleteTrainingExample(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training example:", error);
+      res.status(500).json({ error: "Failed to delete training example" });
+    }
+  });
+
+  // POST /api/training/examples/from-scan/:scanId — Generate training examples from confirmed scan violations
+  app.post("/api/training/examples/from-scan/:scanId", async (req, res) => {
+    try {
+      const scanId = parseInt(req.params.scanId);
+      if (isNaN(scanId)) return res.status(400).json({ error: "Invalid scan ID" });
+      const scan = await storage.getScan(scanId);
+      if (!scan) return res.status(404).json({ error: "Scan not found" });
+
+      const negAccounts = await storage.getNegativeAccountsByScan(scanId);
+      const created: any[] = [];
+
+      for (const acct of negAccounts) {
+        const violations = await storage.getViolationsByAccount(acct.id);
+        const confirmed = violations.filter(v =>
+          v.reviewStatus === "confirmed" || v.reviewStatus === "modified"
+        );
+
+        for (const v of confirmed) {
+          const example = await storage.createTrainingExample({
+            violationType: v.violationType,
+            category: v.category || "FCRA_REPORTING",
+            severity: v.severityOverride || v.severity,
+            fcraStatute: v.fcraStatute,
+            accountType: acct.accountType,
+            title: `${v.violationType} — ${acct.creditor}`,
+            scenario: `Account: ${acct.creditor} (${formatAccountType(acct.accountType)}). ${v.explanation}`,
+            expectedEvidence: v.evidence || "Evidence from confirmed scan",
+            expectedExplanation: v.descriptionOverride || v.explanation,
+            reportExcerpt: acct.rawDetails?.substring(0, 2000) || null,
+            commonMistakes: null,
+            keyIndicators: v.matchedRule || null,
+            caseLawReference: null,
+            regulatoryGuidance: null,
+            isActive: true,
+            source: "confirmed_scan",
+            sourceScanId: scanId,
+            createdBy: req.body.createdBy || scan.reviewedBy || null,
+          });
+          created.push(example);
+        }
+      }
+
+      res.json({ created: created.length, examples: created });
+    } catch (error) {
+      console.error("Error creating training examples from scan:", error);
+      res.status(500).json({ error: "Failed to create training examples from scan" });
     }
   });
 

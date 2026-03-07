@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { NegativeAccount, ViolationPattern } from "@shared/schema";
+import type { NegativeAccount, ViolationPattern, FcraTrainingExample } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -308,7 +308,7 @@ Return ONLY valid JSON:
   ]
 }`;
 
-export async function detectViolations(account: NegativeAccount, clientState?: string | null, learnedPatterns?: ViolationPattern[]): Promise<DetectedViolation[]> {
+export async function detectViolations(account: NegativeAccount, clientState?: string | null, learnedPatterns?: ViolationPattern[], trainingExamples?: FcraTrainingExample[]): Promise<DetectedViolation[]> {
   const accountDetails = buildAccountDescription(account, clientState);
 
   // Use compact prompt when rule-based flags are already present (saves ~40% tokens)
@@ -338,6 +338,40 @@ Use these patterns to:
 2. Increase confidence level when you find violations matching these patterns
 3. Apply similar evidence standards that led to previous confirmations
 4. Flag violations matching these patterns with higher severity when evidence is strong`;
+    }
+  }
+
+  // Inject FCRA training examples to improve detection accuracy
+  if (trainingExamples && trainingExamples.length > 0) {
+    const relevantExamples = trainingExamples
+      .filter(e => e.isActive && e.accountType === account.accountType)
+      .slice(0, 15); // Top 15 most relevant examples
+
+    if (relevantExamples.length > 0) {
+      const exampleLines = relevantExamples.map(e => {
+        let line = `### ${e.title} (${e.severity})\n`;
+        line += `- **Violation**: ${e.violationType} | **Statute**: ${e.fcraStatute}\n`;
+        line += `- **Scenario**: ${e.scenario}\n`;
+        line += `- **Key Evidence**: ${e.expectedEvidence}\n`;
+        line += `- **Expected Finding**: ${e.expectedExplanation}\n`;
+        if (e.keyIndicators) line += `- **Key Indicators**: ${e.keyIndicators}\n`;
+        if (e.commonMistakes) line += `- **Avoid**: ${e.commonMistakes}\n`;
+        if (e.caseLawReference) line += `- **Case Law**: ${e.caseLawReference}\n`;
+        if (e.regulatoryGuidance) line += `- **Guidance**: ${e.regulatoryGuidance}\n`;
+        return line;
+      }).join("\n");
+
+      systemPrompt += `\n\n## FCRA TRAINING EXAMPLES (human-curated violation scenarios)
+The following are expert-curated examples of FCRA violations for ${formatAccountType(account.accountType)} accounts. Use these to calibrate your detection — they represent confirmed real-world violations and teach you what to look for, what evidence matters, and what mistakes to avoid:
+
+${exampleLines}
+
+Apply these training examples to:
+1. Recognize similar violation patterns in the account being analyzed
+2. Use the same evidence standards demonstrated in the examples
+3. Avoid the common mistakes identified in the training data
+4. Reference applicable case law and regulatory guidance when relevant
+5. Match severity levels to similar confirmed scenarios`;
     }
   }
 

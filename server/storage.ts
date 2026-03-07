@@ -1,7 +1,7 @@
 import { db } from "./db";
 import {
   reports, findings, accounts, scans, negativeAccounts, violations, letters,
-  parsedReports, tradelineEvidence, violationPatterns,
+  parsedReports, tradelineEvidence, violationPatterns, fcraTrainingExamples,
   type Report, type InsertReport, type Finding, type InsertFinding,
   type Account, type InsertAccount, type Scan, type InsertScan,
   type NegativeAccount, type InsertNegativeAccount,
@@ -9,6 +9,7 @@ import {
   type ParsedReport, type InsertParsedReport,
   type TradelineEvidence, type InsertTradelineEvidence,
   type ViolationPattern, type InsertViolationPattern,
+  type FcraTrainingExample, type InsertFcraTrainingExample,
 } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -62,6 +63,17 @@ export interface IStorage {
   getAllViolationPatterns(): Promise<ViolationPattern[]>;
   incrementPatternConfirmed(id: number): Promise<ViolationPattern | undefined>;
   incrementPatternRejected(id: number): Promise<ViolationPattern | undefined>;
+
+  // FCRA Training examples
+  createTrainingExample(example: InsertFcraTrainingExample): Promise<FcraTrainingExample>;
+  getTrainingExample(id: number): Promise<FcraTrainingExample | undefined>;
+  getAllTrainingExamples(): Promise<FcraTrainingExample[]>;
+  getActiveTrainingExamples(): Promise<FcraTrainingExample[]>;
+  getTrainingExamplesByCategory(category: string): Promise<FcraTrainingExample[]>;
+  getTrainingExamplesByAccountType(accountType: string): Promise<FcraTrainingExample[]>;
+  updateTrainingExample(id: number, data: Partial<InsertFcraTrainingExample>): Promise<FcraTrainingExample | undefined>;
+  deleteTrainingExample(id: number): Promise<void>;
+  getTrainingStats(): Promise<{ total: number; active: number; byCategory: Record<string, number>; byAccountType: Record<string, number> }>;
 }
 
 class DatabaseStorage implements IStorage {
@@ -298,6 +310,64 @@ class DatabaseStorage implements IStorage {
       .where(eq(violationPatterns.id, id))
       .returning();
     return updated;
+  }
+
+  // ── FCRA Training Examples ──────────────────────────────────────────
+
+  async createTrainingExample(example: InsertFcraTrainingExample): Promise<FcraTrainingExample> {
+    const [created] = await db.insert(fcraTrainingExamples).values(example).returning();
+    return created;
+  }
+
+  async getTrainingExample(id: number): Promise<FcraTrainingExample | undefined> {
+    const [example] = await db.select().from(fcraTrainingExamples).where(eq(fcraTrainingExamples.id, id));
+    return example;
+  }
+
+  async getAllTrainingExamples(): Promise<FcraTrainingExample[]> {
+    return db.select().from(fcraTrainingExamples).orderBy(desc(fcraTrainingExamples.createdAt));
+  }
+
+  async getActiveTrainingExamples(): Promise<FcraTrainingExample[]> {
+    return db.select().from(fcraTrainingExamples)
+      .where(eq(fcraTrainingExamples.isActive, true))
+      .orderBy(desc(fcraTrainingExamples.createdAt));
+  }
+
+  async getTrainingExamplesByCategory(category: string): Promise<FcraTrainingExample[]> {
+    return db.select().from(fcraTrainingExamples)
+      .where(eq(fcraTrainingExamples.category, category))
+      .orderBy(desc(fcraTrainingExamples.createdAt));
+  }
+
+  async getTrainingExamplesByAccountType(accountType: string): Promise<FcraTrainingExample[]> {
+    return db.select().from(fcraTrainingExamples)
+      .where(eq(fcraTrainingExamples.accountType, accountType))
+      .orderBy(desc(fcraTrainingExamples.createdAt));
+  }
+
+  async updateTrainingExample(id: number, data: Partial<InsertFcraTrainingExample>): Promise<FcraTrainingExample | undefined> {
+    const [updated] = await db.update(fcraTrainingExamples)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(fcraTrainingExamples.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteTrainingExample(id: number): Promise<void> {
+    await db.delete(fcraTrainingExamples).where(eq(fcraTrainingExamples.id, id));
+  }
+
+  async getTrainingStats(): Promise<{ total: number; active: number; byCategory: Record<string, number>; byAccountType: Record<string, number> }> {
+    const all = await db.select().from(fcraTrainingExamples);
+    const active = all.filter(e => e.isActive);
+    const byCategory: Record<string, number> = {};
+    const byAccountType: Record<string, number> = {};
+    for (const e of active) {
+      byCategory[e.category] = (byCategory[e.category] || 0) + 1;
+      byAccountType[e.accountType] = (byAccountType[e.accountType] || 0) + 1;
+    }
+    return { total: all.length, active: active.length, byCategory, byAccountType };
   }
 
 }
