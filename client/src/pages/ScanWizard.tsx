@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
@@ -6,12 +6,13 @@ import {
   ArrowLeft, ArrowRight, Plus, Trash2, Shield, FileText,
   Loader2, CheckCircle2, Zap, AlertTriangle, ClipboardList, Eye,
   MapPin, ClipboardCheck, Activity, UploadCloud, Database,
-  Bot, PenTool, Save
+  Bot, PenTool, Save, Download, Search, Filter, ChevronLeft, ChevronRight
 } from "lucide-react";
 import {
   fetchScan, updateScan, addNegativeAccount, updateNegativeAccount,
   deleteNegativeAccount, runManualAnalysisPipeline,
   fetchOrganizedReport, runViolationAnalysis, createManualViolation,
+  exportPdf, exportCsv, exportJson,
 } from "@/lib/api";
 import ViolationReviewCard from "@/components/ViolationReviewCard";
 import {
@@ -700,6 +701,15 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
   const [pipelineResult, setPipelineResult] = useState<any>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(null);
 
+  // Export state
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  // Violation search, filter, pagination state
+  const [violationSearch, setViolationSearch] = useState("");
+  const [violationFilter, setViolationFilter] = useState<"all" | "FCRA" | "FDCPA" | "critical" | "high" | "medium" | "low">("all");
+  const [violationPage, setViolationPage] = useState(1);
+  const VIOLATIONS_PER_PAGE = 10;
+
   // Manual violation entry state
   const emptyViolation = () => ({
     negativeAccountId: negAccounts[0]?.id || 0,
@@ -776,6 +786,96 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
       violationAccountMap.set(v.id, acct);
     }
   }
+
+  // Export handlers
+  const handleExport = async (format: "pdf" | "csv" | "json") => {
+    setExporting(format);
+    try {
+      if (format === "pdf") {
+        const blob = await exportPdf(scanId);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${scan?.consumerName || "report"}-violations.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (format === "csv") {
+        const text = await exportCsv(scanId);
+        const blob = new Blob([text], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${scan?.consumerName || "report"}-violations.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const data = await exportJson(scanId);
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${scan?.consumerName || "report"}-violations.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err: any) {
+      setScanError(err.message || `Failed to export ${format.toUpperCase()}`);
+    }
+    setExporting(null);
+  };
+
+  // Filtered & paginated violations (flat list across all accounts)
+  const allViolations = useMemo(() => {
+    return negAccounts.flatMap((acct: any) =>
+      (acct.violations || []).map((v: any) => ({ ...v, _account: acct }))
+    );
+  }, [negAccounts]);
+
+  const filteredViolations = useMemo(() => {
+    let results = allViolations;
+
+    // Apply category/severity filter
+    if (violationFilter === "FCRA") {
+      results = results.filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
+    } else if (violationFilter === "FDCPA") {
+      results = results.filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
+    } else if (["critical", "high", "medium", "low"].includes(violationFilter)) {
+      results = results.filter((v: any) => v.severity === violationFilter);
+    }
+
+    // Apply search
+    if (violationSearch.trim()) {
+      const q = violationSearch.toLowerCase();
+      results = results.filter((v: any) =>
+        (v.violationType || "").toLowerCase().includes(q) ||
+        (v.explanation || "").toLowerCase().includes(q) ||
+        (v.fcraStatute || "").toLowerCase().includes(q) ||
+        (v._account?.creditor || "").toLowerCase().includes(q)
+      );
+    }
+
+    return results;
+  }, [allViolations, violationFilter, violationSearch]);
+
+  const totalFilteredPages = Math.max(1, Math.ceil(filteredViolations.length / VIOLATIONS_PER_PAGE));
+  const currentPageClamped = Math.min(violationPage, totalFilteredPages);
+  const paginatedViolations = filteredViolations.slice(
+    (currentPageClamped - 1) * VIOLATIONS_PER_PAGE,
+    currentPageClamped * VIOLATIONS_PER_PAGE
+  );
+
+  // Group paginated violations by account for display
+  const paginatedByAccount = useMemo(() => {
+    const map = new Map<number, { account: any; violations: any[] }>();
+    for (const v of paginatedViolations) {
+      const acctId = v._account?.id;
+      if (!map.has(acctId)) {
+        map.set(acctId, { account: v._account, violations: [] });
+      }
+      map.get(acctId)!.violations.push(v);
+    }
+    return Array.from(map.values());
+  }, [paginatedViolations]);
 
   return (
     <div>
@@ -1216,14 +1316,43 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
         <div className="flex gap-2 flex-shrink-0">
           {analysisComplete && (
-            <button
-              data-testid="button-rerun-analysis"
-              onClick={() => setAnalysisMode("choose")}
-              className="px-4 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-2 text-xs"
-            >
-              <Zap className="w-3 h-3" />
-              Re-analyze
-            </button>
+            <>
+              <button
+                data-testid="button-rerun-analysis"
+                onClick={() => setAnalysisMode("choose")}
+                className="px-4 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-2 text-xs"
+              >
+                <Zap className="w-3 h-3" />
+                Re-analyze
+              </button>
+              <button
+                data-testid="button-export-pdf"
+                onClick={() => handleExport("pdf")}
+                disabled={exporting !== null}
+                className="px-3 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-1.5 text-xs disabled:opacity-50"
+              >
+                {exporting === "pdf" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                PDF
+              </button>
+              <button
+                data-testid="button-export-csv"
+                onClick={() => handleExport("csv")}
+                disabled={exporting !== null}
+                className="px-3 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-1.5 text-xs disabled:opacity-50"
+              >
+                {exporting === "csv" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                CSV
+              </button>
+              <button
+                data-testid="button-export-json"
+                onClick={() => handleExport("json")}
+                disabled={exporting !== null}
+                className="px-3 py-2 bg-secondary border border-border text-muted-foreground font-mono rounded-lg hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center gap-1.5 text-xs disabled:opacity-50"
+              >
+                {exporting === "json" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                JSON
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1593,73 +1722,171 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
         </div>
       )}
 
-      {/* Violations grouped by account - editable inline */}
-      {analysisComplete && (
-        <div className="space-y-6 mb-8">
-          {negAccounts.map((acct: any) => {
-            const acctViolations = acct.violations || [];
-            if (acctViolations.length === 0) return null;
+      {/* Search, Filter & Violations */}
+      {analysisComplete && totalViolationCount > 0 && (
+        <>
+          {/* Search & Filter Bar */}
+          <div className="mb-4 flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search violations by type, statute, creditor..."
+                value={violationSearch}
+                onChange={(e) => { setViolationSearch(e.target.value); setViolationPage(1); }}
+                className="w-full pl-9 pr-3 py-2 bg-secondary border border-border rounded-lg text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary transition-colors"
+              />
+            </div>
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <select
+                value={violationFilter}
+                onChange={(e) => { setViolationFilter(e.target.value as any); setViolationPage(1); }}
+                className="pl-8 pr-8 py-2 bg-secondary border border-border rounded-lg text-sm font-mono text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer transition-colors"
+              >
+                <option value="all">All Violations</option>
+                <option value="FCRA">FCRA Only</option>
+                <option value="FDCPA">FDCPA Only</option>
+                <option value="critical">Critical Severity</option>
+                <option value="high">High Severity</option>
+                <option value="medium">Medium Severity</option>
+                <option value="low">Low Severity</option>
+              </select>
+            </div>
+          </div>
 
-            // Split violations by category
-            const acctFcra = acctViolations.filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
-            const acctFdcpa = acctViolations.filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
+          {/* Active filter info */}
+          {(violationSearch || violationFilter !== "all") && (
+            <div className="mb-4 flex items-center gap-2 text-xs font-mono text-muted-foreground">
+              <span>Showing {filteredViolations.length} of {allViolations.length} violations</span>
+              {(violationSearch || violationFilter !== "all") && (
+                <button
+                  onClick={() => { setViolationSearch(""); setViolationFilter("all"); setViolationPage(1); }}
+                  className="text-primary hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
 
-            return (
-              <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-border bg-secondary/30">
-                  <h3 className="font-display text-lg text-foreground">{acct.creditor}</h3>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="text-xs font-mono text-muted-foreground">{formatAccountType(acct.accountType)}</span>
-                    {acct.balance && <span className="text-xs font-mono text-foreground">${Number(acct.balance).toLocaleString()}</span>}
-                    <span className="text-xs font-mono text-muted-foreground">{acctViolations.length} violation{acctViolations.length !== 1 ? "s" : ""}</span>
+          {/* Violations grouped by account - paginated */}
+          <div className="space-y-6 mb-4">
+            {paginatedByAccount.length > 0 ? (
+              paginatedByAccount.map(({ account: acct, violations: acctViolations }) => {
+                const acctFcra = acctViolations.filter((v: any) => !v.category || v.category === "FCRA_REPORTING");
+                const acctFdcpa = acctViolations.filter((v: any) => v.category && v.category !== "FCRA_REPORTING");
+
+                return (
+                  <div key={acct.id} data-testid={`nextstep-account-${acct.id}`} className="bg-card border border-border rounded-xl overflow-hidden">
+                    <div className="px-6 py-4 border-b border-border bg-secondary/30">
+                      <h3 className="font-display text-lg text-foreground">{acct.creditor}</h3>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-xs font-mono text-muted-foreground">{formatAccountType(acct.accountType)}</span>
+                        {acct.balance && <span className="text-xs font-mono text-foreground">${Number(acct.balance).toLocaleString()}</span>}
+                        <span className="text-xs font-mono text-muted-foreground">{acctViolations.length} violation{acctViolations.length !== 1 ? "s" : ""}</span>
+                      </div>
+                    </div>
+
+                    <div className="p-6 space-y-4">
+                      {acctFcra.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-mono text-blue-600 mb-3 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> FCRA REPORTING VIOLATIONS ({acctFcra.length})
+                          </h4>
+                          <div className="space-y-3">
+                            {acctFcra.map((v: any) => (
+                              <ViolationReviewCard
+                                key={v.id}
+                                violation={v}
+                                account={acct}
+                                scanId={scanId}
+                                isLocked={false}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {acctFdcpa.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-mono text-purple-600 mb-3 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> DEBT COLLECTOR CONDUCT VIOLATIONS ({acctFdcpa.length})
+                          </h4>
+                          <div className="space-y-3">
+                            {acctFdcpa.map((v: any) => (
+                              <ViolationReviewCard
+                                key={v.id}
+                                violation={v}
+                                account={acct}
+                                scanId={scanId}
+                                isLocked={false}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-
-                <div className="p-6 space-y-4">
-                  {/* FCRA Violations */}
-                  {acctFcra.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-mono text-blue-600 mb-3 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> FCRA REPORTING VIOLATIONS ({acctFcra.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {acctFcra.map((v: any) => (
-                          <ViolationReviewCard
-                            key={v.id}
-                            violation={v}
-                            account={acct}
-                            scanId={scanId}
-                            isLocked={false}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* FDCPA Violations */}
-                  {acctFdcpa.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-mono text-purple-600 mb-3 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> DEBT COLLECTOR CONDUCT VIOLATIONS ({acctFdcpa.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {acctFdcpa.map((v: any) => (
-                          <ViolationReviewCard
-                            key={v.id}
-                            violation={v}
-                            account={acct}
-                            scanId={scanId}
-                            isLocked={false}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                );
+              })
+            ) : (
+              <div className="bg-secondary/30 border border-border rounded-xl p-8 text-center">
+                <Search className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+                <p className="text-sm font-mono text-muted-foreground">No violations match your search or filter criteria.</p>
               </div>
-            );
-          })}
-        </div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {totalFilteredPages > 1 && (
+            <div className="mb-8 flex items-center justify-between">
+              <span className="text-xs font-mono text-muted-foreground">
+                Page {currentPageClamped} of {totalFilteredPages}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setViolationPage(p => Math.max(1, p - 1))}
+                  disabled={currentPageClamped <= 1}
+                  className="px-3 py-1.5 bg-secondary border border-border rounded-lg text-xs font-mono text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3 h-3" /> Prev
+                </button>
+                {Array.from({ length: totalFilteredPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalFilteredPages || Math.abs(p - currentPageClamped) <= 1)
+                  .reduce<(number | "...")[]>((acc, p, i, arr) => {
+                    if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push("...");
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, i) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${i}`} className="px-2 text-xs text-muted-foreground">...</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setViolationPage(p as number)}
+                        className={`w-8 h-8 rounded-lg text-xs font-mono transition-colors ${
+                          p === currentPageClamped
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-secondary border border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                <button
+                  onClick={() => setViolationPage(p => Math.min(totalFilteredPages, p + 1))}
+                  disabled={currentPageClamped >= totalFilteredPages}
+                  className="px-3 py-1.5 bg-secondary border border-border rounded-lg text-xs font-mono text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+                >
+                  Next <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Accounts without violations after analysis */}
