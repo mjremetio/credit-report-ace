@@ -103,7 +103,7 @@ export default function ScanWizard() {
   const rawStep = scan?.currentStep || 1;
   // For upload-based scans, always render Step4NextSteps (the analysis/review view)
   // since steps 5-6 are progress indicators, not separate UI screens
-  const step = isUploadBased ? 4 : rawStep;
+  const step = isUploadBased ? 4 : Math.min(rawStep, 4);
 
   // For upload-based scans, use persisted currentStep from DB (checkpointed by server pipelines)
   // Fallback: infer from account scan state if DB step seems stale
