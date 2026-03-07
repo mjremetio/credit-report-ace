@@ -90,6 +90,8 @@ export async function scanAccountForViolations(accountId: number) {
   try {
     const res = await fetch(`/api/accounts/${accountId}/scan`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -263,6 +265,8 @@ export async function runViolationAnalysis(scanId: number) {
   try {
     const res = await fetch(`/api/scans/${scanId}/run-violations`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -276,10 +280,37 @@ export async function runViolationAnalysis(scanId: number) {
     if (err.name === "AbortError") {
       throw new Error("Violation analysis timed out. Please try again.");
     }
+    // Connection may drop during long AI processing while server continues.
+    // Poll the scan to check if analysis completed despite the fetch error.
+    if (err.message === "Failed to fetch" || err.name === "TypeError") {
+      const result = await pollViolationCompletion(scanId);
+      if (result) return result;
+    }
     throw err;
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+/** Poll scan status to recover from dropped connections during long-running analysis */
+async function pollViolationCompletion(scanId: number, maxAttempts = 40, intervalMs = 5000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    try {
+      const scan = await fetchScan(scanId);
+      // Step 6 = analysis complete
+      if (scan.currentStep >= 6) {
+        const accounts = scan.negativeAccounts || [];
+        const violationsFound = accounts.reduce((sum: number, a: any) => sum + (a.violations?.length || 0), 0);
+        return { scanId, accountsCreated: accounts.length, violationsFound };
+      }
+      // If step went backwards or is still at an early stage, server likely failed too
+      if (scan.currentStep < 5) return null;
+    } catch {
+      // Scan fetch also failed, keep polling
+    }
+  }
+  return null;
 }
 
 // ========== MANUAL ANALYSIS PIPELINE API ==========
@@ -290,6 +321,8 @@ export async function runManualAnalysisPipeline(scanId: number) {
   try {
     const res = await fetch(`/api/scans/${scanId}/analyze`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -300,6 +333,11 @@ export async function runManualAnalysisPipeline(scanId: number) {
   } catch (err: any) {
     if (err.name === "AbortError") {
       throw new Error("Analysis pipeline timed out. Please try again.");
+    }
+    // Connection may drop during long AI processing while server continues.
+    if (err.message === "Failed to fetch" || err.name === "TypeError") {
+      const result = await pollViolationCompletion(scanId);
+      if (result) return result;
     }
     throw err;
   } finally {
