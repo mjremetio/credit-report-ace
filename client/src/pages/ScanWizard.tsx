@@ -14,6 +14,7 @@ import {
   fetchOrganizedReport, runViolationAnalysis, createManualViolation,
 } from "@/lib/api";
 import ViolationReviewCard from "@/components/ViolationReviewCard";
+import ExportButtons from "@/components/ExportButtons";
 import {
   AlertDialog, AlertDialogTrigger, AlertDialogContent,
   AlertDialogHeader, AlertDialogFooter, AlertDialogTitle,
@@ -1674,6 +1675,14 @@ function Step4NextSteps({ scan, scanId, goToStep, navigate }: { scan: any; scanI
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Export options when analysis is complete */}
+      {analysisComplete && totalViolationCount > 0 && (
+        <div className="mb-8 bg-card border border-border rounded-xl p-6">
+          <h4 className="font-display text-sm text-foreground mb-4">Export Results</h4>
+          <ExportButtons scanId={scanId} />
         </div>
       )}
 
