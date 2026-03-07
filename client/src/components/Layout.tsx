@@ -1,10 +1,11 @@
 import { useLocation } from "wouter";
-import { Shield, UploadCloud, ClipboardList, Eye } from "lucide-react";
+import { Shield, UploadCloud, ClipboardList, Eye, Brain } from "lucide-react";
 
 const NAV_ITEMS = [
   { path: "/upload", label: "Upload Report", icon: UploadCloud, testId: "nav-upload" },
   { path: "/", label: "Violation Analysis", icon: ClipboardList, testId: "nav-manual" },
   { path: "/profile", label: "Profile Overview", icon: Eye, testId: "nav-profile" },
+  { path: "/training", label: "AI Training", icon: Brain, testId: "nav-training" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {

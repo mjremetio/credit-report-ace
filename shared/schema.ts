@@ -152,6 +152,35 @@ export const violationPatterns = pgTable("violation_patterns", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// ── FCRA Training Examples (human-curated violation scenarios for AI improvement) ──
+export const fcraTrainingExamples = pgTable("fcra_training_examples", {
+  id: serial("id").primaryKey(),
+  // Violation classification
+  violationType: text("violation_type").notNull(),          // e.g. "BALANCE_PAID_NOT_ZERO"
+  category: text("category").notNull(),                     // FCRA_REPORTING, DEBT_COLLECTOR_DISCLOSURE, etc.
+  severity: text("severity").notNull(),                     // critical, high, medium, low
+  fcraStatute: text("fcra_statute").notNull(),               // e.g. "§1681e(b)"
+  accountType: text("account_type").notNull(),               // debt_collection, charge_off, repossession
+  // Training content
+  title: text("title").notNull(),                            // Short descriptive title
+  scenario: text("scenario").notNull(),                      // Detailed scenario description
+  expectedEvidence: text("expected_evidence").notNull(),      // What evidence should look like
+  expectedExplanation: text("expected_explanation").notNull(), // Model explanation of violation
+  reportExcerpt: text("report_excerpt"),                     // Sample credit report text
+  // Teaching signals
+  commonMistakes: text("common_mistakes"),                   // AI mistakes to avoid
+  keyIndicators: text("key_indicators"),                     // What to look for in report data
+  caseLawReference: text("case_law_reference"),              // Relevant case law
+  regulatoryGuidance: text("regulatory_guidance"),           // CFPB or FTC guidance
+  // Status and tracking
+  isActive: boolean("is_active").default(true).notNull(),
+  source: text("source").default("manual"),                  // manual, case_law, regulatory, confirmed_scan
+  sourceScanId: integer("source_scan_id"),                   // If derived from a real scan
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const letters = pgTable("letters", {
   id: serial("id").primaryKey(),
   negativeAccountId: integer("negative_account_id").notNull().references(() => negativeAccounts.id, { onDelete: "cascade" }),
@@ -171,6 +200,7 @@ export const insertViolationSchema = createInsertSchema(violations).omit({ id: t
 export const insertParsedReportSchema = createInsertSchema(parsedReports).omit({ id: true, createdAt: true });
 export const insertTradelineEvidenceSchema = createInsertSchema(tradelineEvidence).omit({ id: true, createdAt: true });
 export const insertViolationPatternSchema = createInsertSchema(violationPatterns).omit({ id: true, createdAt: true });
+export const insertFcraTrainingExampleSchema = createInsertSchema(fcraTrainingExamples).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertLetterSchema = createInsertSchema(letters).omit({ id: true, createdAt: true });
 
 export type Report = typeof reports.$inferSelect;
@@ -191,5 +221,7 @@ export type TradelineEvidence = typeof tradelineEvidence.$inferSelect;
 export type InsertTradelineEvidence = z.infer<typeof insertTradelineEvidenceSchema>;
 export type ViolationPattern = typeof violationPatterns.$inferSelect;
 export type InsertViolationPattern = z.infer<typeof insertViolationPatternSchema>;
+export type FcraTrainingExample = typeof fcraTrainingExamples.$inferSelect;
+export type InsertFcraTrainingExample = z.infer<typeof insertFcraTrainingExampleSchema>;
 export type Letter = typeof letters.$inferSelect;
 export type InsertLetter = z.infer<typeof insertLetterSchema>;
