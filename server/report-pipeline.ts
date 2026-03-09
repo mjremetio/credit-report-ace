@@ -1129,6 +1129,48 @@ function buildCrossBureauDiffs(tl: Tradeline): CrossBureauDiff[] {
     }
   }
 
+  // Check payment history cross-bureau mismatches
+  const monthMap = new Map<string, Map<string, string>>();
+  for (const bd of details) {
+    if (!bd.paymentHistory || bd.paymentHistory.length === 0) continue;
+    for (const ph of bd.paymentHistory) {
+      if (!monthMap.has(ph.month)) monthMap.set(ph.month, new Map());
+      monthMap.get(ph.month)!.set(bd.bureau, ph.code);
+    }
+  }
+  Array.from(monthMap.entries()).forEach(([month, bureauCodes]) => {
+    if (bureauCodes.size < 2) return;
+    const codes = Array.from(bureauCodes.values());
+    const unique = new Set(codes.map((c: string) => c.toUpperCase()));
+    if (unique.size > 1) {
+      const values: Record<string, string | number | null> = {};
+      Array.from(bureauCodes.entries()).forEach(([bureau, code]) => { values[bureau] = code; });
+      diffs.push({
+        field: `paymentHistory_${month}`,
+        values,
+        warning: `Payment history for ${month} differs across bureaus`,
+      });
+    }
+  });
+
+  // Check account rating vs status conflict
+  for (const bd of details) {
+    if (!bd.accountRating || !bd.status) continue;
+    const rating = bd.accountRating.toLowerCase();
+    const status = bd.status.toLowerCase();
+    const ratingCurrent = rating.includes("current") || rating.includes("open") || rating === "1" || rating.startsWith("1 ");
+    const statusDerog = status.includes("charge") || status.includes("collection") || status.includes("derog");
+    const ratingDerog = rating.includes("charge") || rating.includes("collection") || /^9\b/.test(rating);
+    const statusCurrent = status === "current" || status === "open" || status === "paid";
+    if ((ratingCurrent && statusDerog) || (ratingDerog && statusCurrent)) {
+      diffs.push({
+        field: "accountRatingStatusConflict",
+        values: { [`${bd.bureau}_rating`]: bd.accountRating, [`${bd.bureau}_status`]: bd.status },
+        warning: `${bd.bureau}: rating "${bd.accountRating}" conflicts with status "${bd.status}"`,
+      });
+    }
+  }
+
   // Check dispute remark consistency
   const bureausWithDispute: string[] = [];
   const bureausWithoutDispute: string[] = [];

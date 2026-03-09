@@ -80,11 +80,15 @@ You will receive account data as a JSON object with these keys:
 ### Payment History Issues
 - PAYMENT_GRID_INCONSISTENT_WITH_STATUS: Payment grid shows current but status says derogatory (or vice versa)
 - DEROGATORY_STACKING: 4+ consecutive late payments — may indicate re-aging or stacking
-- PAYMENT_HISTORY_MISMATCH_CROSS_BUREAU: Payment grids differ between bureaus for same months
+- PAYMENT_HISTORY_MISMATCH_CROSS_BUREAU: Payment grids differ between bureaus for same months. Compare month-by-month payment codes (C, 30, 60, 90, 120, CO) across TransUnion/Experian/Equifax — if one bureau shows "C" (current) for a month but another shows "30" or "60" (late), this is a significant furnisher error. Even one month of divergence is actionable under §1681e(b).
 
-### Credit Limit Issues
+### Credit Limit / High Balance Issues
 - MISSING_CREDIT_LIMIT: Credit limit omitted on revolving account — artificially inflates utilization
 - CREDIT_LIMIT_MISMATCH_CROSS_BUREAU: Credit limit differs across bureaus
+- HIGH_BALANCE_MISMATCH_CROSS_BUREAU: High balance differs across bureaus for same account
+
+### Account Rating Issues
+- ACCOUNT_RATING_STATUS_CONFLICT: Account rating contradicts reported status (e.g., rating="Open/Current" but status="Charge-Off", or rating="9-Charge Off" but status="Paid")
 
 ### Collection-Specific Issues
 - MISSING_ORIGINAL_CREDITOR: Collection account doesn't identify original creditor
@@ -235,20 +239,21 @@ ANALYSIS CHECKLIST — For EVERY account, systematically check:
 3. **Proper creditor identification**: original creditor listed on collections, OC + collector both reporting balance
 4. **Bureau consistency**: Compare ALL fields across TransUnion/Experian/Equifax — status, balance, credit limit, creditor type, account rating, payment status, dates
 5. **Account type accuracy**: collection misclassified as revolving, authorized user as primary, creditor type mismatch
-6. **Payment history alignment**: grid matches reported status, consecutive late payments (stacking/re-aging), cross-bureau payment history differences
+6. **Payment history alignment**: grid matches reported status, consecutive late payments (stacking/re-aging), cross-bureau payment history differences — compare EACH month's code across bureaus (C vs 30 vs 60 etc.)
 7. **Remarks analysis**: Look for dispute remarks (inconsistent across bureaus?), bankruptcy remarks (balance should be $0), collection indicators
-8. **High balance / credit limit**: balance exceeds high balance on charge-offs, missing credit limit on revolving accounts
+8. **High balance / credit limit**: balance exceeds high balance on charge-offs, missing credit limit on revolving accounts, high balance mismatch across bureaus
+9. **Account rating vs status**: rating says "Current" but status says "Charge-Off" (or vice versa) — these fields must be consistent
 
 DEBT COLLECTOR SPECIFIC CHECKLIST — For EVERY debt_collection account, ALWAYS check:
-9. **Mini-Miranda disclosure**: Flag that CRO must verify all written communications include proper disclosure language — this is the #1 most commonly missed violation
-10. **California license number**: If client state is CA, flag that all correspondence must include CA debt collector license number
-11. **Cease contact compliance**: Flag that CRO must ask if client sent a written stop request and if contact continued
-12. **Inconvenient time/workplace calls**: Flag that CRO must ask about call timing and whether client said they were at work
-13. **Third-party disclosure**: Flag that CRO must ask if collector contacted anyone else about the debt
-14. **Excessive/harassing calls**: Flag that CRO must ask about call frequency, call logs, threatening language
-15. **Privacy and authorization**: Verify all inquiries had a permissible purpose, check for unauthorized report access or pulls, verify employer credit checks had prior written consumer consent
-16. **Required notices**: Check if adverse action notices were provided after credit denials or rate increases, verify negative information notices were sent before/within 30 days of first reporting, confirm credit score was disclosed when used in a credit decision, verify consumer was informed of dispute rights and right to free report
-17. **Mixed file indicators**: Check for accounts that may belong to someone with a similar SSN, similar name (Jr./Sr./III), or same address — may indicate CRA mixed consumer files
+10. **Mini-Miranda disclosure**: Flag that CRO must verify all written communications include proper disclosure language — this is the #1 most commonly missed violation
+11. **California license number**: If client state is CA, flag that all correspondence must include CA debt collector license number
+12. **Cease contact compliance**: Flag that CRO must ask if client sent a written stop request and if contact continued
+13. **Inconvenient time/workplace calls**: Flag that CRO must ask about call timing and whether client said they were at work
+14. **Third-party disclosure**: Flag that CRO must ask if collector contacted anyone else about the debt
+15. **Excessive/harassing calls**: Flag that CRO must ask about call frequency, call logs, threatening language
+16. **Privacy and authorization**: Verify all inquiries had a permissible purpose, check for unauthorized report access or pulls, verify employer credit checks had prior written consumer consent
+17. **Required notices**: Check if adverse action notices were provided after credit denials or rate increases, verify negative information notices were sent before/within 30 days of first reporting, confirm credit score was disclosed when used in a credit decision, verify consumer was informed of dispute rights and right to free report
+18. **Mixed file indicators**: Check for accounts that may belong to someone with a similar SSN, similar name (Jr./Sr./III), or same address — may indicate CRA mixed consumer files
 
 For FCRA reporting violations, use category "FCRA_REPORTING". For privacy violations, use "PRIVACY_VIOLATION". For impermissible purpose pulls, use "IMPERMISSIBLE_PURPOSE". For missing required notices, use "WITHHOLDING_NOTICES". For debt collector conduct violations, use the specific category name (DEBT_COLLECTOR_DISCLOSURE, CA_LICENSE_MISSING, CEASE_CONTACT_VIOLATION, INCONVENIENT_CONTACT, THIRD_PARTY_DISCLOSURE, HARASSMENT_EXCESSIVE_CALLS).`;
 
