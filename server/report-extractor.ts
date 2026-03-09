@@ -31,12 +31,18 @@ import type {
 import type { ReportSection } from "./report-parser";
 import { batchSections } from "./report-parser";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  timeout: 300_000,
-  maxRetries: 2,
-});
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      timeout: 300_000,
+      maxRetries: 2,
+    });
+  }
+  return _openai;
+}
 
 // ── Pass 1: Extract structured fields ──────────────────────────────
 
@@ -237,7 +243,7 @@ Use the exact same field shapes as described: tradelines with bureauDetails arra
 // ── LLM call helper ────────────────────────────────────────────────
 
 async function llmExtract<T>(systemPrompt: string, userPrompt: string, sectionText: string): Promise<T> {
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: "gpt-5.2",
     messages: [
       { role: "system", content: systemPrompt },
@@ -255,7 +261,7 @@ async function llmExtractImage<T>(systemPrompt: string, userPrompt: string, imag
   const base64 = imageBuffer.toString("base64");
   const mediaType = mimeType.startsWith("image/") ? mimeType : "image/png";
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: "gpt-5.2",
     messages: [
       { role: "system", content: systemPrompt },
@@ -453,39 +459,89 @@ export async function extractPass1(sections: ReportSection[], imageBuffer?: Buff
 // ── Pass 2: Validate + Dedupe + Normalize ──────────────────────────
 
 function normalizeBureau(name: string): Bureau | null {
+  if (!name) return null;
   const n = name.toLowerCase().trim();
-  if (n.includes("transunion") || n === "tu") return "TransUnion";
-  if (n.includes("experian") || n === "ex") return "Experian";
-  if (n.includes("equifax") || n === "eq") return "Equifax";
+  if (n.includes("transunion") || n === "tu" || n === "tuc") return "TransUnion";
+  if (n.includes("experian") || n === "ex" || n === "exp" || n === "xpn") return "Experian";
+  if (n.includes("equifax") || n === "eq" || n === "efx") return "Equifax";
   return null;
 }
 
 function normalizeAccountType(raw: string | undefined): AccountType {
   if (!raw) return "other";
   const t = raw.toLowerCase();
-  if (t.includes("revolv")) return "revolving";
-  if (t.includes("install")) return "installment";
+  if (t.includes("revolv") || t.includes("credit card") || t.includes("line of credit")) return "revolving";
+  if (t.includes("install") || t.includes("personal loan") || t.includes("consumer loan")) return "installment";
   if (t.includes("collect")) return "collection";
-  if (t.includes("mortgage") || t.includes("home")) return "mortgage";
-  if (t.includes("student")) return "student_loan";
-  if (t.includes("auto")) return "auto_loan";
+  if (t.includes("mortgage") || t.includes("home loan") || t.includes("heloc")) return "mortgage";
+  if (t.includes("student") || t.includes("education")) return "student_loan";
+  if (t.includes("auto") || t.includes("vehicle") || t.includes("car loan")) return "auto_loan";
   return "other";
 }
 
 function normalizeAccountStatus(raw: string | undefined): AccountStatus {
   if (!raw) return "other";
   const s = raw.toLowerCase();
-  if (s.includes("current") || s.includes("open") && !s.includes("charge")) return "current";
+  // Check chargeoff BEFORE current/open so "charged off" isn't caught by "open" check
+  if (s.includes("chargeoff") || (s.includes("charge") && s.includes("off"))) return "chargeoff";
+  if (s.includes("current") || (s.includes("open") && !s.includes("charge"))) return "current";
   if (s.includes("late") || s.includes("past due") || s.includes("delinq")) return "late";
-  if (s.includes("charge") && s.includes("off") || s.includes("chargeoff")) return "chargeoff";
-  if (s.includes("collect")) return "collection";
-  if (s.includes("closed") || s.includes("transferred")) return "closed";
+  // Check paid/settled BEFORE collection so "Paid Collection" returns "paid"
   if (s.includes("paid")) return "paid";
   if (s.includes("settled")) return "settled";
+  if (s.includes("collect")) return "collection";
+  if (s.includes("closed") || s.includes("transferred")) return "closed";
   if (s.includes("bankrupt")) return "bankruptcy";
   if (s.includes("reposs")) return "repossession";
   if (s.includes("derog")) return "derogatory";
   return "other";
+}
+
+/**
+ * Parse a dollar amount from LLM output.
+ * Handles "$1,234.56", "1234", "$1234", "1,234", etc.
+ * Returns null if unparseable.
+ */
+function parseDollarAmount(val: unknown): number | null {
+  if (typeof val === "number") return val;
+  if (typeof val !== "string") return null;
+  const cleaned = val.replace(/[$,\s]/g, "").trim();
+  if (!cleaned || cleaned === "--" || cleaned === "N/A" || cleaned.toLowerCase() === "null") return null;
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
+}
+
+/**
+ * Normalize a date value from LLM output.
+ * Handles various formats: "01/15/1985", "1985-03-15", "03/2018", "2018-03", "1985", etc.
+ * Returns ISO-ish format: "YYYY-MM-DD", "YYYY-MM", or "YYYY".
+ */
+function normalizeDate(val: unknown): string | undefined {
+  if (!val) return undefined;
+  const s = String(val).trim();
+  if (s === "--" || s === "N/A" || s.toLowerCase() === "null" || s.toLowerCase() === "none") return undefined;
+
+  // Already ISO format (YYYY-MM-DD or YYYY-MM or YYYY)
+  if (/^\d{4}(-\d{2}(-\d{2})?)?$/.test(s)) return s;
+
+  // MM/DD/YYYY
+  const mdyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdyMatch) {
+    const [, mm, dd, yyyy] = mdyMatch;
+    return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  }
+
+  // MM/YYYY
+  const myMatch = s.match(/^(\d{1,2})\/(\d{4})$/);
+  if (myMatch) {
+    const [, mm, yyyy] = myMatch;
+    return `${yyyy}-${mm.padStart(2, "0")}`;
+  }
+
+  // YYYY alone
+  if (/^\d{4}$/.test(s)) return s;
+
+  return s; // return as-is if unrecognized
 }
 
 function dedupeTradelineKey(t: LLMTradelineExtraction): string {
@@ -522,10 +578,10 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
   const profile: CreditReportProfile = {
     name: raw.profile?.name || "Unknown Consumer",
     aliases: raw.profile?.aliases || [],
-    dateOfBirth: raw.profile?.dateOfBirth || undefined,
+    dateOfBirth: normalizeDate(raw.profile?.dateOfBirth) || undefined,
     dateOfBirthPerBureau: dobPerBureau,
     ssn: raw.profile?.ssn || undefined,
-    reportDate: raw.profile?.reportDate || new Date().toISOString().split("T")[0],
+    reportDate: normalizeDate(raw.profile?.reportDate) || new Date().toISOString().split("T")[0],
     scores: (raw.profile?.scores || []).map(s => ({
       bureau: normalizeBureau(s.bureau) || "TransUnion" as Bureau,
       score: typeof s.score === "number" ? s.score : null,
@@ -589,22 +645,22 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
       acc.push({
         bureau,
         accountNumber: bd.accountNumber,
-        balance: typeof bd.balance === "number" ? bd.balance : null,
+        balance: parseDollarAmount(bd.balance),
         status: bd.status,
-        dateOpened: bd.dateOpened,
-        dateClosed: bd.dateClosed,
-        lastPaymentDate: bd.lastPaymentDate,
-        lastReportedDate: bd.lastReportedDate,
-        highBalance: typeof bd.highBalance === "number" ? bd.highBalance : null,
-        creditLimit: typeof bd.creditLimit === "number" ? bd.creditLimit : null,
-        monthlyPayment: typeof bd.monthlyPayment === "number" ? bd.monthlyPayment : null,
+        dateOpened: normalizeDate(bd.dateOpened),
+        dateClosed: normalizeDate(bd.dateClosed),
+        lastPaymentDate: normalizeDate(bd.lastPaymentDate),
+        lastReportedDate: normalizeDate(bd.lastReportedDate),
+        highBalance: parseDollarAmount(bd.highBalance),
+        creditLimit: parseDollarAmount(bd.creditLimit),
+        monthlyPayment: parseDollarAmount(bd.monthlyPayment),
         paymentStatus: bd.paymentStatus,
         accountRating: bd.accountRating,
         creditorType: bd.creditorType,
-        pastDueAmount: typeof bd.pastDueAmount === "number" ? bd.pastDueAmount : null,
+        pastDueAmount: parseDollarAmount(bd.pastDueAmount),
         terms: bd.terms,
         paymentHistory: (bd.paymentHistory || []).map(ph => ({
-          month: ph.month,
+          month: normalizeDate(ph.month) || ph.month,
           code: ph.code,
         })),
         daysLate7Year: bd.daysLate7Year ? {
@@ -642,7 +698,7 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
     }
 
     // ── Aggregate balance from bureau details if top-level is missing ──
-    let balance: number | null = typeof t.balance === "number" ? t.balance : null;
+    let balance: number | null = parseDollarAmount(t.balance);
     if (balance === null && uniqueBureauDetails.length > 0) {
       // Use the highest balance across bureaus (most conservative for dispute purposes)
       const bureauBalances = uniqueBureauDetails
@@ -661,11 +717,11 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
       lastPayment?: string;
       lastReported?: string;
     } = {
-      opened: t.dates?.opened,
-      closed: t.dates?.closed,
-      firstDelinquency: t.dates?.firstDelinquency,
-      lastPayment: t.dates?.lastPayment,
-      lastReported: t.dates?.lastReported,
+      opened: normalizeDate(t.dates?.opened),
+      closed: normalizeDate(t.dates?.closed),
+      firstDelinquency: normalizeDate(t.dates?.firstDelinquency),
+      lastPayment: normalizeDate(t.dates?.lastPayment),
+      lastReported: normalizeDate(t.dates?.lastReported),
     };
 
     if (uniqueBureauDetails.length > 0) {
@@ -677,6 +733,26 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
       if (!dates.closed) {
         const closedDates = uniqueBureauDetails.filter(bd => bd.dateClosed).map(bd => bd.dateClosed!);
         if (closedDates.length > 0) dates.closed = closedDates.sort().reverse()[0]; // latest
+      }
+      if (!dates.firstDelinquency) {
+        // Derive DOFD from payment history if not explicitly provided
+        // Use earliest delinquency date found in payment history across bureaus
+        const dofdCandidates: string[] = [];
+        for (const bd of uniqueBureauDetails) {
+          if (bd.paymentHistory && bd.paymentHistory.length > 0) {
+            // Find the earliest late entry in the payment history (sorted chronologically)
+            const lateEntries = bd.paymentHistory
+              .filter(ph => /^(30|60|90|120|150|CO|CL|BK)$/.test(ph.code))
+              .map(ph => ph.month)
+              .sort();
+            if (lateEntries.length > 0) {
+              dofdCandidates.push(lateEntries[0]);
+            }
+          }
+        }
+        if (dofdCandidates.length > 0) {
+          dates.firstDelinquency = dofdCandidates.sort()[0]; // earliest across bureaus
+        }
       }
       if (!dates.lastPayment) {
         const lpDates = uniqueBureauDetails.filter(bd => bd.lastPaymentDate).map(bd => bd.lastPaymentDate!);
@@ -729,9 +805,9 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
     type: r.type || "Unknown",
     court: r.court,
     caseNumber: r.caseNumber,
-    dateFiled: r.dateFiled,
-    dateDischarged: r.dateDischarged,
-    amount: typeof r.amount === "number" ? r.amount : null,
+    dateFiled: normalizeDate(r.dateFiled),
+    dateDischarged: normalizeDate(r.dateDischarged),
+    amount: parseDollarAmount(r.amount),
     bureaus: (r.bureaus || []).map(b => normalizeBureau(b)).filter((b): b is Bureau => b !== null),
     remarks: r.remarks || [],
     evidenceText: r.evidenceText,
@@ -747,7 +823,7 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
     inquirySet.add(key);
     acc.push({
       creditorName: i.creditorName || "Unknown",
-      date: i.date,
+      date: normalizeDate(i.date) || i.date,
       type: (i.type === "hard" || i.type === "soft") ? i.type : "unknown" as const,
       bureau,
       permissiblePurpose: i.permissiblePurpose,
@@ -756,14 +832,16 @@ export function validateAndNormalize(raw: RawExtraction): ParsedCreditReport {
   }, []);
 
   // ── Consumer Statements ──
-  const consumerStatements: ConsumerStatement[] = raw.consumerStatements.map(cs => {
-    const bureau = normalizeBureau(cs.bureau);
-    return {
-      bureau: bureau || "TransUnion" as Bureau,
-      statement: cs.statement || "",
-      dateAdded: cs.dateAdded,
-    };
-  }).filter(cs => cs.statement.length > 0);
+  const consumerStatements: ConsumerStatement[] = (raw.consumerStatements || [])
+    .map(cs => {
+      const bureau = normalizeBureau(cs.bureau);
+      return {
+        bureau: bureau || "TransUnion" as Bureau,
+        statement: cs.statement || "",
+        dateAdded: normalizeDate(cs.dateAdded),
+      };
+    })
+    .filter(cs => cs.statement.length > 0);
 
   return {
     profile,
