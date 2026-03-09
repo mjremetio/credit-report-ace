@@ -1,12 +1,18 @@
 import OpenAI from "openai";
 import type { NegativeAccount, ViolationPattern, FcraTrainingExample } from "@shared/schema";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  timeout: 300_000, // 5 minutes per request
-  maxRetries: 2,
-});
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      timeout: 300_000, // 5 minutes per request
+      maxRetries: 2,
+    });
+  }
+  return _openai;
+}
 
 // Use higher-capability model for more accurate violation detection
 const VIOLATION_MODEL = "o3";
@@ -308,11 +314,12 @@ Return ONLY valid JSON:
   ]
 }`;
 
-export async function detectViolations(account: NegativeAccount, clientState?: string | null, learnedPatterns?: ViolationPattern[], trainingExamples?: FcraTrainingExample[]): Promise<DetectedViolation[]> {
-  const accountDetails = buildAccountDescription(account, clientState);
-
+/**
+ * Build the system prompt with training data injected.
+ * Exported for testing purposes.
+ */
+export function buildSystemPrompt(account: NegativeAccount, learnedPatterns?: ViolationPattern[], trainingExamples?: FcraTrainingExample[]): string {
   // Use compact prompt when rule-based flags are already present (saves ~40% tokens)
-  // Check both JSON format (new) and text format (legacy)
   const hasRuleFlags = account.rawDetails?.includes('"ruleBasedFlags"') ||
     account.rawDetails?.includes("RULE-BASED FLAGS") ||
     account.rawDetails?.includes("Rule-Based Flags:");
@@ -320,31 +327,59 @@ export async function detectViolations(account: NegativeAccount, clientState?: s
 
   // Inject learned violation patterns to enhance scanning accuracy
   if (learnedPatterns && learnedPatterns.length > 0) {
-    const relevantPatterns = learnedPatterns
-      .filter(p => p.accountType === account.accountType && p.timesConfirmed > p.timesRejected)
-      .slice(0, 20); // Top 20 most confirmed patterns
+    const accountPatterns = learnedPatterns.filter(p => p.accountType === account.accountType);
 
-    if (relevantPatterns.length > 0) {
-      const patternLines = relevantPatterns.map(p =>
-        `- ${p.violationType} (${p.severity}, confirmed ${p.timesConfirmed}x): ${p.matchedRule || "N/A"} | ${p.fcraStatute || ""} | Evidence pattern: ${p.evidencePattern || "N/A"}`
-      ).join("\n");
+    // Confirmed patterns: high confidence, used to boost detection
+    const confirmedPatterns = accountPatterns
+      .filter(p => p.timesConfirmed > p.timesRejected)
+      .slice(0, 20);
+
+    // Rejected patterns: frequently rejected by reviewers — these are false positives to avoid
+    const rejectedPatterns = accountPatterns
+      .filter(p => p.timesRejected > 0 && p.timesRejected >= p.timesConfirmed)
+      .slice(0, 10);
+
+    if (confirmedPatterns.length > 0) {
+      const patternLines = confirmedPatterns.map(p => {
+        const total = p.timesConfirmed + p.timesRejected;
+        const accuracy = total > 0 ? Math.round((p.timesConfirmed / total) * 100) : 100;
+        const weight = accuracy >= 90 ? "HIGH CONFIDENCE" : accuracy >= 70 ? "MODERATE CONFIDENCE" : "LOW CONFIDENCE";
+        return `- [${weight}] ${p.violationType} (${p.severity}, confirmed ${p.timesConfirmed}/${total} reviews, ${accuracy}% accuracy): ${p.matchedRule || "N/A"} | ${p.fcraStatute || ""} | Evidence pattern: ${p.evidencePattern || "N/A"}`;
+      }).join("\n");
 
       systemPrompt += `\n\n## LEARNED VIOLATION PATTERNS (from previously confirmed reviews)
-The following violation patterns have been confirmed by human reviewers on similar ${formatAccountType(account.accountType)} accounts. Prioritize checking for these patterns as they have high accuracy:
+The following violation patterns have been confirmed by human reviewers on similar ${formatAccountType(account.accountType)} accounts. Prioritize checking for these patterns — they reflect real outcomes from human review:
 ${patternLines}
 
 Use these patterns to:
-1. Prioritize checking for violations that have been frequently confirmed
-2. Increase confidence level when you find violations matching these patterns
+1. Prioritize checking for HIGH CONFIDENCE violations — they are almost always correct
+2. Increase confidence level when you find violations matching confirmed patterns
 3. Apply similar evidence standards that led to previous confirmations
-4. Flag violations matching these patterns with higher severity when evidence is strong`;
+4. For MODERATE/LOW CONFIDENCE patterns, require stronger evidence before flagging`;
+    }
+
+    if (rejectedPatterns.length > 0) {
+      const rejectedLines = rejectedPatterns.map(p => {
+        const total = p.timesConfirmed + p.timesRejected;
+        return `- ${p.violationType} (rejected ${p.timesRejected}/${total} reviews): ${p.matchedRule || "N/A"} — This type of finding is frequently a FALSE POSITIVE on ${formatAccountType(account.accountType)} accounts`;
+      }).join("\n");
+
+      systemPrompt += `\n\n## FALSE POSITIVE PATTERNS (frequently rejected by human reviewers)
+The following violation types have been frequently REJECTED by human reviewers on similar ${formatAccountType(account.accountType)} accounts. AVOID flagging these unless you have VERY strong, specific evidence:
+${rejectedLines}
+
+For these patterns:
+1. Do NOT flag them unless the evidence is unambiguous and clearly documented in the account data
+2. If you do flag one, set confidence to "possible" and explain why this case is different from typical false positives
+3. These patterns were rejected because they often lack sufficient evidence or misinterpret normal reporting`;
     }
   }
 
   // Inject FCRA training examples to improve detection accuracy
   if (trainingExamples && trainingExamples.length > 0) {
+    // Training examples are pre-filtered by accountType from the caller; filter for active only
     const relevantExamples = trainingExamples
-      .filter(e => e.isActive && e.accountType === account.accountType)
+      .filter(e => e.isActive)
       .slice(0, 15); // Top 15 most relevant examples
 
     if (relevantExamples.length > 0) {
@@ -375,9 +410,16 @@ Apply these training examples to:
     }
   }
 
+  return systemPrompt;
+}
+
+export async function detectViolations(account: NegativeAccount, clientState?: string | null, learnedPatterns?: ViolationPattern[], trainingExamples?: FcraTrainingExample[]): Promise<DetectedViolation[]> {
+  const accountDetails = buildAccountDescription(account, clientState);
+  const systemPrompt = buildSystemPrompt(account, learnedPatterns, trainingExamples);
+
   let response;
   try {
-    response = await openai.chat.completions.create({
+    response = await getOpenAI().chat.completions.create({
       model: VIOLATION_MODEL,
       messages: [
         { role: "system", content: systemPrompt },

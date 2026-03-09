@@ -544,7 +544,7 @@ export async function registerRoutes(
 
       // Fetch learned patterns and training examples for this account type to enhance scanning accuracy
       const learnedPatterns = await storage.getViolationPatternsByAccountType(account.accountType);
-      const trainingExamples = await storage.getActiveTrainingExamples();
+      const trainingExamples = await storage.getTrainingExamplesByAccountType(account.accountType);
 
       const detectedViolations = await detectViolations(account, clientState, learnedPatterns, trainingExamples);
       const savedViolations = [];
@@ -653,6 +653,38 @@ export async function registerRoutes(
       if (parsed.data.paralegalNotes !== undefined) updates.paralegalNotes = parsed.data.paralegalNotes;
 
       const updated = await storage.updateViolation(id, updates);
+
+      // Real-time pattern learning from individual violation reviews
+      if (parsed.data.reviewStatus === "confirmed" || parsed.data.reviewStatus === "modified") {
+        const account = await storage.getNegativeAccount(violation.negativeAccountId);
+        if (account) {
+          await storage.createOrUpdateViolationPattern({
+            violationType: violation.violationType,
+            matchedRule: violation.matchedRule,
+            category: violation.category,
+            severity: parsed.data.severityOverride || violation.severity,
+            accountType: account.accountType,
+            creditorPattern: account.creditor,
+            evidencePattern: violation.evidence?.substring(0, 500) || null,
+            fcraStatute: violation.fcraStatute,
+            confidence: parsed.data.confidence || violation.confidence,
+          });
+        }
+      } else if (parsed.data.reviewStatus === "rejected") {
+        // Learn from rejections — find matching pattern and increment rejection counter
+        const account = await storage.getNegativeAccount(violation.negativeAccountId);
+        if (account) {
+          const patterns = await storage.getViolationPatternsByAccountType(account.accountType);
+          const matchingPattern = patterns.find(p =>
+            p.violationType === violation.violationType &&
+            p.matchedRule === (violation.matchedRule || null)
+          );
+          if (matchingPattern) {
+            await storage.incrementPatternRejected(matchingPattern.id);
+          }
+        }
+      }
+
       res.json(updated);
     } catch (error) {
       console.error("Error reviewing violation:", error);
@@ -760,7 +792,7 @@ export async function registerRoutes(
         status: "completed",
       });
 
-      // Learn from confirmed violations — save patterns for future scanning
+      // Learn from all reviewed violations — save patterns for future scanning
       const negAccounts = await storage.getNegativeAccountsByScan(id);
       const accountMap = new Map(negAccounts.map(a => [a.id, a]));
       for (const v of allViolations) {
@@ -778,6 +810,78 @@ export async function registerRoutes(
             fcraStatute: v.fcraStatute,
             confidence: v.confidence,
           });
+        } else if (v.reviewStatus === "rejected") {
+          // Learn from rejections — track false positives to suppress in future scans
+          const patterns = await storage.getViolationPatternsByAccountType(acct.accountType);
+          const matchingPattern = patterns.find(p =>
+            p.violationType === v.violationType &&
+            p.matchedRule === (v.matchedRule || null)
+          );
+          if (matchingPattern) {
+            await storage.incrementPatternRejected(matchingPattern.id);
+          } else {
+            // Create a new pattern with rejection so the AI learns to avoid this false positive
+            await storage.createOrUpdateViolationPattern({
+              violationType: v.violationType,
+              matchedRule: v.matchedRule,
+              category: v.category,
+              severity: v.severity,
+              accountType: acct.accountType,
+              creditorPattern: acct.creditor,
+              evidencePattern: v.evidence?.substring(0, 500) || null,
+              fcraStatute: v.fcraStatute,
+              confidence: v.confidence,
+            });
+            // Immediately mark the new pattern as rejected once
+            const newPatterns = await storage.getViolationPatternsByAccountType(acct.accountType);
+            const newMatch = newPatterns.find(p =>
+              p.violationType === v.violationType &&
+              p.matchedRule === (v.matchedRule || null)
+            );
+            if (newMatch) {
+              await storage.incrementPatternRejected(newMatch.id);
+            }
+          }
+        }
+      }
+
+      // Auto-generate training examples from confirmed violations for future AI improvement
+      const confirmedViolations = allViolations.filter(v =>
+        v.reviewStatus === "confirmed" || v.reviewStatus === "modified"
+      );
+      if (confirmedViolations.length > 0) {
+        let trainingCreated = 0;
+        for (const v of confirmedViolations) {
+          const acct = accountMap.get(v.negativeAccountId);
+          if (!acct) continue;
+          try {
+            await storage.createTrainingExample({
+              violationType: v.violationType,
+              category: v.category || "FCRA_REPORTING",
+              severity: v.severityOverride || v.severity,
+              fcraStatute: v.fcraStatute,
+              accountType: acct.accountType,
+              title: `${v.violationType} — ${acct.creditor}`,
+              scenario: `Account: ${acct.creditor} (${formatAccountType(acct.accountType)}). ${v.descriptionOverride || v.explanation}`,
+              expectedEvidence: v.evidence || "Evidence from confirmed scan",
+              expectedExplanation: v.descriptionOverride || v.explanation,
+              reportExcerpt: acct.rawDetails?.substring(0, 2000) || null,
+              commonMistakes: null,
+              keyIndicators: v.matchedRule || null,
+              caseLawReference: null,
+              regulatoryGuidance: null,
+              isActive: true,
+              source: "confirmed_scan",
+              sourceScanId: id,
+              createdBy: parsed.data.reviewedBy || null,
+            });
+            trainingCreated++;
+          } catch (err) {
+            console.warn(`Failed to create training example for violation ${v.id}:`, err);
+          }
+        }
+        if (trainingCreated > 0) {
+          console.log(`Auto-generated ${trainingCreated} training examples from approved scan ${id}`);
         }
       }
 
