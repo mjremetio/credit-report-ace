@@ -59,6 +59,10 @@ export function computeIssueFlags(report: ParsedCreditReport, clientState?: stri
     flags.push(...checkMissingCreditLimit(tl));
     flags.push(...checkMissingOriginalCreditor(tl));
     flags.push(...checkPaymentGridStatusConflict(tl));
+    flags.push(...checkPaymentHistoryCrossBureauMismatch(tl));
+    flags.push(...checkHighBalanceMismatch(tl));
+    flags.push(...checkAccountRatingStatusConflict(tl));
+    flags.push(...checkLastReportedDateMismatch(tl));
     flags.push(...checkDebtCollectorViolations(tl, clientState));
   }
 
@@ -544,6 +548,172 @@ function checkPaymentGridStatusConflict(tl: Tradeline): IssueFlag[] {
   }
 
   return flags;
+}
+
+function checkPaymentHistoryCrossBureauMismatch(tl: Tradeline): IssueFlag[] {
+  if (tl.bureauDetails.length < 2) return [];
+
+  // Build month→bureau→code map
+  const monthMap = new Map<string, Map<string, string>>();
+  for (const bd of tl.bureauDetails) {
+    if (!bd.paymentHistory || bd.paymentHistory.length === 0) continue;
+    for (const ph of bd.paymentHistory) {
+      if (!monthMap.has(ph.month)) monthMap.set(ph.month, new Map());
+      monthMap.get(ph.month)!.set(bd.bureau, ph.code);
+    }
+  }
+
+  // Find months where codes differ across bureaus
+  const mismatches: Array<{ month: string; codes: Record<string, string> }> = [];
+  Array.from(monthMap.entries()).forEach(([month, bureauCodes]) => {
+    if (bureauCodes.size < 2) return;
+    const codes = Array.from(bureauCodes.values());
+    const unique = new Set(codes.map((c: string) => c.toUpperCase()));
+    if (unique.size > 1) {
+      const codeObj: Record<string, string> = {};
+      Array.from(bureauCodes.entries()).forEach(([bureau, code]) => { codeObj[bureau] = code; });
+      mismatches.push({ month, codes: codeObj });
+    }
+  });
+
+  if (mismatches.length === 0) return [];
+
+  // Only flag if at least one mismatch involves a severity difference
+  // (e.g., C vs 30, or 30 vs 60 — not just formatting differences)
+  const significantMismatches = mismatches.filter(m => {
+    const codes = Object.values(m.codes).map(c => c.toUpperCase());
+    const hasLate = codes.some(c => /^(30|60|90|120|150|CO|CL|BK)$/.test(c));
+    const hasCurrent = codes.some(c => c === "C" || c === "--" || c === "OK");
+    return hasLate && hasCurrent;
+  });
+
+  if (significantMismatches.length === 0) return [];
+
+  const top3 = significantMismatches.slice(0, 3);
+  const desc = top3.map(m => {
+    const pairs = Object.entries(m.codes).map(([b, c]) => `${b}=${c}`).join(", ");
+    return `${m.month}: ${pairs}`;
+  }).join("; ");
+
+  const allBureaus = new Set<Bureau>();
+  for (const m of significantMismatches) {
+    for (const bureau of Object.keys(m.codes)) allBureaus.add(bureau as Bureau);
+  }
+
+  return [flag(
+    "PAYMENT_HISTORY_CROSS_BUREAU_MISMATCH",
+    "high",
+    tl.creditorName,
+    `Payment history codes differ across bureaus: ${desc}${significantMismatches.length > 3 ? ` (+${significantMismatches.length - 3} more months)` : ""}`,
+    Array.from(allBureaus),
+    { mismatchCount: significantMismatches.length, sample: desc },
+    "Dispute under §1681e(b) — payment history must be consistent across all bureaus",
+  )];
+}
+
+function checkHighBalanceMismatch(tl: Tradeline): IssueFlag[] {
+  if (tl.bureauDetails.length < 2) return [];
+  const highBalances = tl.bureauDetails
+    .filter(bd => bd.highBalance !== null && bd.highBalance !== undefined)
+    .map(bd => ({ bureau: bd.bureau, highBalance: bd.highBalance! }));
+
+  if (highBalances.length < 2) return [];
+
+  const unique = new Set(highBalances.map(h => h.highBalance));
+  if (unique.size <= 1) return [];
+
+  const evidence: Record<string, string | number | null> = {};
+  for (const h of highBalances) evidence[h.bureau] = h.highBalance;
+
+  return [flag(
+    "BUREAU_HIGH_BALANCE_MISMATCH",
+    "medium",
+    tl.creditorName,
+    `High balance differs across bureaus: ${highBalances.map(h => `${h.bureau}=$${h.highBalance}`).join(", ")}`,
+    highBalances.map(h => h.bureau),
+    evidence,
+    "Dispute inaccurate high balance reporting under §1681e(b)",
+  )];
+}
+
+function checkAccountRatingStatusConflict(tl: Tradeline): IssueFlag[] {
+  const flags: IssueFlag[] = [];
+
+  for (const bd of tl.bureauDetails) {
+    if (!bd.accountRating || !bd.status) continue;
+
+    const rating = bd.accountRating.toLowerCase();
+    const status = bd.status.toLowerCase();
+
+    // Rating says current/open but status is derogatory
+    const ratingCurrent = rating.includes("current") || rating.includes("open") || rating === "1" || rating.startsWith("1 ");
+    const statusDerog = status.includes("charge") || status.includes("collection") || status.includes("derog") || status.includes("reposs");
+
+    if (ratingCurrent && statusDerog) {
+      flags.push(flag(
+        "ACCOUNT_RATING_STATUS_CONFLICT",
+        "high",
+        tl.creditorName,
+        `${bd.bureau}: Account rating "${bd.accountRating}" conflicts with status "${bd.status}"`,
+        [bd.bureau],
+        { rating: bd.accountRating, status: bd.status },
+        "Dispute under §1681e(b) — account rating must be consistent with reported status",
+      ));
+    }
+
+    // Rating says derogatory but status is current
+    const ratingDerog = rating.includes("charge") || rating.includes("collection") || /^9\b/.test(rating) || rating.includes("derog");
+    const statusCurrent = status === "current" || status === "open" || status === "paid" || status === "settled";
+
+    if (ratingDerog && statusCurrent) {
+      flags.push(flag(
+        "ACCOUNT_RATING_STATUS_CONFLICT",
+        "high",
+        tl.creditorName,
+        `${bd.bureau}: Account rating "${bd.accountRating}" conflicts with status "${bd.status}"`,
+        [bd.bureau],
+        { rating: bd.accountRating, status: bd.status },
+        "Dispute under §1681e(b) — account rating must be consistent with reported status",
+      ));
+    }
+  }
+
+  return flags;
+}
+
+function checkLastReportedDateMismatch(tl: Tradeline): IssueFlag[] {
+  if (tl.bureauDetails.length < 2) return [];
+  const reportedDates = tl.bureauDetails
+    .filter(bd => bd.lastReportedDate)
+    .map(bd => ({ bureau: bd.bureau, date: bd.lastReportedDate! }));
+
+  if (reportedDates.length < 2) return [];
+
+  const unique = new Set(reportedDates.map(d => d.date));
+  if (unique.size <= 1) return [];
+
+  // Only flag if dates differ by more than 1 month (allow minor reporting lag)
+  const dates = reportedDates.map(d => new Date(d.date)).filter(d => !isNaN(d.getTime()));
+  if (dates.length < 2) return [];
+
+  const maxDate = Math.max(...dates.map(d => d.getTime()));
+  const minDate = Math.min(...dates.map(d => d.getTime()));
+  const diffMonths = (maxDate - minDate) / (30 * 24 * 60 * 60 * 1000);
+
+  if (diffMonths < 2) return []; // Allow 1 month reporting lag
+
+  const evidence: Record<string, string | number | null> = {};
+  for (const d of reportedDates) evidence[d.bureau] = d.date;
+
+  return [flag(
+    "LAST_REPORTED_DATE_MISMATCH",
+    "low",
+    tl.creditorName,
+    `Last reported dates differ across bureaus: ${reportedDates.map(d => `${d.bureau}=${d.date}`).join(", ")} — may indicate stale reporting`,
+    reportedDates.map(d => d.bureau),
+    evidence,
+    "Verify bureau reporting is up to date — stale reporting may indicate furnisher not updating all bureaus",
+  )];
 }
 
 function checkPublicRecordFlags(pr: PublicRecord, tradelines: Tradeline[]): IssueFlag[] {
